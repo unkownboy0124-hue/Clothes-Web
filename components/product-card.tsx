@@ -107,7 +107,7 @@ export function ProductCard({
                   aria-label={`Select color ${opt.name} for ${item.name}`}
                   aria-pressed={isSelected}
                   onClick={() => onSelectColor(opt.hex)}
-                  className={`inline-flex size-6 items-center justify-center rounded-full border transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                  className={`inline-flex size-7 items-center justify-center rounded-full border transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:size-6 ${
                     isSelected
                       ? "scale-105 border-foreground ring-1 ring-foreground ring-offset-1 ring-offset-card"
                       : "border-transparent"
@@ -125,10 +125,10 @@ export function ProductCard({
 
         <div className="mt-5 space-y-1.5">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-xs uppercase tracking-[0.14em] text-muted-foreground">
+            <span className="min-w-0 truncate text-xs uppercase tracking-[0.14em] text-muted-foreground">
               {item.kind ?? "Garment"} · {getColorName(activeColor)}
             </span>
-            <span className="font-mono text-[15px] font-medium tabular-nums text-foreground">
+            <span className="shrink-0 font-mono text-[15px] font-medium tabular-nums text-foreground">
               {item.tag}
             </span>
           </div>
