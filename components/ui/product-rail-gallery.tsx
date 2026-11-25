@@ -778,7 +778,7 @@ export function ClothingRailHero({
     s.flowVel += (targetSpeed - s.flowVel) * speedBlend;
     if (!flowAllowed && Math.abs(s.flowVel) < 0.05) s.flowVel = 0;
 
-    const useWrap = s.wrapSpan > 0 && !(carousel && live.current.engaged);
+    const useWrap = s.wrapSpan > 0 && !carousel;
     if (Math.abs(s.flowVel) > 0.01 && useWrap) {
       s.flow += s.flowVel * dt;
       if (s.flow <= -s.wrapSpan) s.flow += s.wrapSpan;
@@ -927,7 +927,7 @@ export function ClothingRailHero({
     } else if (s.flow <= -span || s.flow > 0) {
       s.flow = ((s.flow % span) + span) % span - span;
     }
-    const useWrap = span > 0 && !(size.carousel && engaged);
+    const useWrap = span > 0 && !size.carousel;
     const fresh = s.x.length !== count;
     for (let i = 0; i < count; i++) {
       const base = (xs[i] ?? 0) + (size.carousel ? pointer.current.swipe : 0);
