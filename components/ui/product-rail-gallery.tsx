@@ -569,6 +569,8 @@ function Photo({
   );
 }
 
+const FLOW_SPEED = -24;
+
 function wrapAround(val: number, center: number, span: number) {
   if (span <= 0) return val;
   const min = center - span / 2;
@@ -762,11 +764,34 @@ export function ClothingRailHero({
     const dt = s.last ? Math.min(0.034, (now - s.last) / 1000) : 1 / 60;
     s.last = now;
     const { h, width, carousel } = live.current.size;
-    const flowAllowed = false;
-    s.flow = 0;
-    s.flowVel = 0;
+    const settledIntro = now - s.mountedAt >= 650;
+    const flowAllowed =
+      live.current.playing &&
+      !live.current.reduced &&
+      !live.current.engaged &&
+      live.current.openIndex === null &&
+      s.drag < 0 &&
+      n > 0 &&
+      width > 0;
+    const targetSpeed = flowAllowed && settledIntro ? FLOW_SPEED : 0;
+    const speedBlend = 1 - Math.exp(-3.2 * dt);
+    s.flowVel += (targetSpeed - s.flowVel) * speedBlend;
+    if (!flowAllowed && Math.abs(s.flowVel) < 0.05) s.flowVel = 0;
 
     const useWrap = s.wrapSpan > 0 && !(carousel && live.current.engaged);
+    if (Math.abs(s.flowVel) > 0.01 && useWrap) {
+      s.flow += s.flowVel * dt;
+      if (s.flow <= -s.wrapSpan) s.flow += s.wrapSpan;
+      else if (s.flow > 0) s.flow -= s.wrapSpan;
+      for (let i = 0; i < n; i++) {
+        const newTx = wrapAround((s.baseTx[i] ?? 0) + s.flow, width / 2, s.wrapSpan);
+        const oldTx = s.tx[i] ?? newTx;
+        if (Math.abs(newTx - oldTx) > s.wrapSpan * 0.5) {
+          s.x[i] = (s.x[i] ?? newTx) + (newTx - oldTx);
+        }
+        s.tx[i] = newTx;
+      }
+    }
 
     let busy = false;
     const sub = 2;
