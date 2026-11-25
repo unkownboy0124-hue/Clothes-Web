@@ -1,0 +1,1273 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>VirtualFit: Spatial Try-On</title>
+  <meta name="description" content="Single-screen visionOS-style spatial virtual try-on arc with frosted-glass garment cards, 3D arc physics, and scan-line outfit reveal." />
+  <meta property="og:title" content="VirtualFit: Spatial Try-On" />
+  <meta property="og:description" content="Single-screen visionOS-style spatial virtual try-on arc with frosted-glass garment cards, 3D arc physics, and scan-line outfit reveal." />
+  <meta property="og:type" content="website" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --ease: cubic-bezier(.2,.8,.2,1);
+      --sans: "Inter",system-ui,-apple-system,sans-serif;
+      --MH: min(78vh,62vw);
+      --CW: min(14.8vw,33vh);
+      --room: url("https://images.higgs.ai/?default=1&output=webp&url=https%3A%2F%2Fd8j0ntlcm91z4.cloudfront.net%2Fuser_38xzZboKViGWJOttwIXH07lWA1P%2Fhf_20261104_080623_c94c85a3-23d5-4a0c-afff-41be1b5b8191.png&w=2400&q=85");
+      --model: url("https://images.higgs.ai/?default=1&output=webp&url=https%3A%2F%2Fd8j0ntlcm91z4.cloudfront.net%2Fuser_38xzZboKViGWJOttwIXH07lWA1P%2Fhf_20261104_080717_e02cb856-b812-4c9b-9b86-8a741c7f65eb.png&w=2688&q=85");
+      --garm: url("https://images.higgs.ai/?default=1&output=webp&url=https%3A%2F%2Fd8j0ntlcm91z4.cloudfront.net%2Fuser_38xzZboKViGWJOttwIXH07lWA1P%2Fhf_20261104_080719_f5a4cca2-cf42-4957-ab3b-ddec34d2b71a.png&w=2048&q=85");
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      height: 100%;
+    }
+
+    body {
+      background: #e9e4dc;
+      color: #fff;
+      font-family: var(--sans);
+      overflow: hidden;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    button {
+      font: inherit;
+      color: inherit;
+      background: none;
+      border: 0;
+      outline: none;
+    }
+
+    @media (pointer: fine) {
+      html, body, button {
+        cursor: none;
+      }
+    }
+
+    /* 1. Room */
+    .room {
+      position: fixed;
+      inset: -3%;
+      z-index: 1;
+      background: var(--room) center/cover no-repeat;
+      filter: blur(2.5px) saturate(1.05);
+      transform: scale(1.08);
+      will-change: transform;
+    }
+
+    .room::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(70% 60% at 50% 45%, rgba(255,252,246,.10), rgba(40,30,20,.16));
+      pointer-events: none;
+    }
+
+    /* 2. Ghost word */
+    .ghost {
+      position: fixed;
+      left: 50%;
+      top: calc(50% - var(--MH) * .42);
+      transform: translate(-50%, 0);
+      z-index: 2;
+      pointer-events: none;
+      font-weight: 900;
+      font-size: calc(var(--MH) * .42);
+      line-height: .8;
+      letter-spacing: -.04em;
+      white-space: nowrap;
+      color: rgba(255,255,255,.3);
+      -webkit-text-stroke: 1px rgba(255,255,255,.35);
+      text-shadow: 0 1px 0 rgba(255,255,255,.35);
+      will-change: transform;
+    }
+
+    .ghost span {
+      display: inline-block;
+      will-change: transform;
+    }
+
+    /* 3. Glass material */
+    .glass {
+      background: linear-gradient(155deg, rgba(250,248,245,.30), rgba(150,144,136,.20) 48%, rgba(205,200,192,.24));
+      -webkit-backdrop-filter: blur(22px) saturate(1.5);
+      backdrop-filter: blur(22px) saturate(1.5);
+      border: 1px solid rgba(255,255,255,.5);
+      box-shadow:
+        inset 0 1px 0 rgba(255,255,255,.7),
+        inset 0 -1px 0 rgba(255,255,255,.12),
+        0 20px 50px -24px rgba(40,30,20,.45);
+    }
+
+    /* 4. Tabs */
+    .tabs {
+      position: fixed;
+      top: 4.2vh;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 30;
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      padding: 5px;
+      border-radius: 999px;
+      max-width: calc(100vw - 24px);
+    }
+
+    .tab-pill {
+      position: absolute;
+      top: 5px;
+      left: 0;
+      height: 38px;
+      border-radius: 999px;
+      background: rgba(255,255,255,.92);
+      box-shadow: 0 4px 14px -6px rgba(0,0,0,.3);
+      transition: transform .6s var(--ease), width .6s var(--ease);
+      pointer-events: none;
+    }
+
+    .tab {
+      position: relative;
+      z-index: 1;
+      height: 38px;
+      padding: 0 22px;
+      border-radius: 999px;
+      font-size: 14px;
+      font-weight: 500;
+      color: rgba(30,30,32,.72);
+      white-space: nowrap;
+      flex-shrink: 0;
+      transition: color .35s var(--ease);
+    }
+
+    .tab.is-active {
+      color: #111;
+    }
+
+    /* 5. Rail */
+    .rail {
+      position: fixed;
+      left: max(18px, 1.8vw);
+      top: 50%;
+      transform: translateY(-50%);
+      z-index: 30;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      padding: 8px;
+      border-radius: 999px;
+    }
+
+    .rail button {
+      width: 42px;
+      height: 42px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      color: rgba(30,30,32,.8);
+      transition: background .25s var(--ease), color .25s var(--ease), transform .2s var(--ease);
+    }
+
+    .rail button:hover {
+      background: rgba(255,255,255,.35);
+    }
+
+    .rail button.is-active {
+      background: rgba(255,255,255,.9);
+      color: #111;
+      box-shadow: 0 4px 12px -4px rgba(0,0,0,.2);
+    }
+
+    .rail svg {
+      width: 20px;
+      height: 20px;
+      display: block;
+    }
+
+    /* 6. Stage & Cards */
+    .stage {
+      position: fixed;
+      inset: 0;
+      z-index: 10;
+      touch-action: pan-y;
+    }
+
+    .arc {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 0;
+      height: 0;
+    }
+
+    .card {
+      position: absolute;
+      width: var(--CW);
+      height: calc(var(--CW) * 1.42);
+      margin-left: calc(var(--CW) * -.5);
+      margin-top: calc(var(--CW) * -.71);
+      border-radius: 22px;
+      overflow: hidden;
+      will-change: transform, opacity, filter;
+    }
+
+    .card .g {
+      position: absolute;
+      left: 8%;
+      right: 8%;
+      top: 5%;
+      height: 66%;
+      background-image: var(--garm);
+      background-size: 320% 212.5%;
+      background-repeat: no-repeat;
+      filter: drop-shadow(0 14px 14px rgba(40,30,20,.22));
+      pointer-events: none;
+    }
+
+    .card .name {
+      position: absolute;
+      left: 10%;
+      right: 10%;
+      bottom: 17%;
+      text-align: center;
+      font-weight: 500;
+      font-size: calc(var(--CW) * .068);
+      line-height: 1.15;
+      color: #fff;
+      text-shadow: 0 1px 8px rgba(0,0,0,.18);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      pointer-events: none;
+    }
+
+    .card .price {
+      position: absolute;
+      left: 10%;
+      right: 10%;
+      bottom: 7%;
+      text-align: center;
+      font-weight: 700;
+      font-size: calc(var(--CW) * .095);
+      line-height: 1.1;
+      color: #fff;
+      text-shadow: 0 1px 8px rgba(0,0,0,.18);
+      pointer-events: none;
+    }
+
+    .card .sheen {
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(105deg, transparent 40%, rgba(255,255,255,.5) 50%, transparent 60%);
+      transform: translateX(-110%);
+      pointer-events: none;
+    }
+
+    /* 7. Model */
+    .model {
+      position: fixed;
+      left: 50%;
+      bottom: 0;
+      transform: translateX(-50%);
+      height: var(--MH);
+      aspect-ratio: 524 / 1360;
+      z-index: 50;
+      pointer-events: none;
+    }
+
+    .model .fig {
+      position: absolute;
+      inset: 0;
+      background-image: var(--model);
+      background-size: 513% 111.76%;
+      background-position-y: 100%;
+      background-repeat: no-repeat;
+    }
+
+    #mCur {
+      opacity: 0;
+    }
+
+    #mNext {
+      clip-path: inset(0 0 100% 0);
+    }
+
+    .model .grid {
+      position: absolute;
+      inset: 0;
+      background: repeating-linear-gradient(0deg, transparent 0 5px, rgba(255,255,255,.22) 5px 6px);
+      mix-blend-mode: screen;
+      clip-path: inset(0 0 100% 0);
+    }
+
+    .model .scan {
+      position: absolute;
+      left: -14%;
+      right: -14%;
+      top: 0;
+      height: 2px;
+      opacity: 0;
+      background: linear-gradient(90deg, transparent, #fff 18%, #fff 82%, transparent);
+      box-shadow: 0 0 18px 4px rgba(255,255,255,.75), 0 0 60px 10px rgba(190,225,255,.45);
+    }
+
+    .model .scan::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 100%;
+      height: calc(var(--MH) * .12);
+      background: linear-gradient(to top, rgba(220,238,255,.32), transparent);
+      pointer-events: none;
+    }
+
+    /* 8. Arrows */
+    .arrow {
+      position: fixed;
+      top: 50%;
+      transform: translateY(-50%);
+      z-index: 30;
+      width: 46px;
+      height: 46px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      color: #222;
+      transition: transform .25s var(--ease), background .25s var(--ease);
+    }
+
+    .arrow:hover {
+      background: linear-gradient(155deg, rgba(255,255,255,.5), rgba(215,210,202,.32));
+    }
+
+    .arrow:active {
+      transform: translateY(-50%) scale(.92);
+    }
+
+    .arrow svg {
+      width: 16px;
+      height: 16px;
+      display: block;
+    }
+
+    #prev {
+      left: calc(max(18px, 1.8vw) + 76px);
+    }
+
+    #next {
+      right: max(18px, 1.8vw);
+    }
+
+    /* 9. Buy card */
+    .buy {
+      position: fixed;
+      left: 50%;
+      bottom: 4.6vh;
+      transform: translateX(-50%);
+      z-index: 60;
+      width: min(640px, calc(100vw - 32px));
+      display: flex;
+      align-items: center;
+      gap: 22px;
+      padding: 12px 22px 12px 12px;
+      border-radius: 24px;
+      color: #fff;
+      text-shadow: 0 1px 6px rgba(0,0,0,.18);
+    }
+
+    .thumb {
+      position: relative;
+      width: 64px;
+      height: 64px;
+      flex-shrink: 0;
+      border-radius: 14px;
+      background: rgba(255,255,255,.3);
+      overflow: hidden;
+    }
+
+    .thumb-g {
+      position: absolute;
+      inset: 6px;
+      background-image: var(--garm);
+      background-size: 320% 212.5%;
+      background-repeat: no-repeat;
+    }
+
+    .info {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .ln {
+      position: relative;
+      height: 1.15em;
+      line-height: 1.15em;
+      overflow: hidden;
+    }
+
+    .ln > span {
+      position: absolute;
+      left: 0;
+      top: 0;
+      right: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      display: block;
+    }
+
+    .b-name {
+      font-weight: 600;
+      font-size: 16px;
+    }
+
+    .b-price {
+      font-weight: 500;
+      font-size: 14px;
+      opacity: .9;
+    }
+
+    .sizes-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      flex-shrink: 0;
+    }
+
+    .lbl {
+      font-weight: 500;
+      font-size: 12px;
+      opacity: .85;
+    }
+
+    .sizes {
+      display: flex;
+      gap: 6px;
+    }
+
+    .chip {
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      background: rgba(255,255,255,.22);
+      color: #fff;
+      font-size: 12px;
+      font-weight: 600;
+      display: grid;
+      place-items: center;
+      transition: background .25s var(--ease), color .25s var(--ease), transform .15s var(--ease);
+    }
+
+    .chip.is-active {
+      background: #fff;
+      color: #111;
+      text-shadow: none;
+    }
+
+    .chip:active {
+      transform: scale(.9);
+    }
+
+    .colors-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      min-width: 118px;
+      flex-shrink: 0;
+    }
+
+    .dots {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      height: 30px;
+    }
+
+    .dot {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      transition: box-shadow .25s var(--ease), transform .2s var(--ease);
+    }
+
+    .dot.is-active {
+      box-shadow: 0 0 0 2px rgba(255,255,255,.95), 0 0 0 4px rgba(0,0,0,.12);
+    }
+
+    .dot:active {
+      transform: scale(.9);
+    }
+
+    /* 10. Cursor */
+    .cur {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 58px;
+      height: 58px;
+      margin: -29px 0 0 -29px;
+      z-index: 100;
+      pointer-events: none;
+      display: none;
+      opacity: 0;
+      will-change: transform;
+    }
+
+    @media (pointer: fine) {
+      .cur {
+        display: block;
+      }
+    }
+
+    .cur-ring {
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      border: 1.5px solid rgba(255,255,255,.95);
+      background: rgba(255,255,255,.14);
+      -webkit-backdrop-filter: blur(6px);
+      backdrop-filter: blur(6px);
+      box-shadow: 0 6px 20px -8px rgba(0,0,0,.35);
+      transition: transform .5s var(--ease), background .5s var(--ease);
+    }
+
+    .cur-dot {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 6px;
+      height: 6px;
+      margin: -3px 0 0 -3px;
+      border-radius: 50%;
+      background: #fff;
+      transition: transform .4s var(--ease), opacity .4s var(--ease);
+    }
+
+    .cur-lbl {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .12em;
+      opacity: 0;
+      transform: scale(.7);
+      transition: transform .45s var(--ease), opacity .45s var(--ease);
+    }
+
+    .cur-try {
+      color: #111;
+    }
+
+    .cur-drag {
+      color: #fff;
+    }
+
+    .cur.is-try .cur-ring {
+      transform: scale(1.5);
+      background: rgba(255,255,255,.92);
+    }
+
+    .cur.is-try .cur-dot {
+      transform: scale(0);
+      opacity: 0;
+    }
+
+    .cur.is-try .cur-try {
+      opacity: 1;
+      transform: scale(1);
+    }
+
+    .cur.is-drag .cur-ring {
+      transform: scale(1.2);
+    }
+
+    .cur.is-drag .cur-dot {
+      transform: scale(0);
+      opacity: 0;
+    }
+
+    .cur.is-drag .cur-drag {
+      opacity: 1;
+      transform: scale(1);
+    }
+
+    .cur.is-btn .cur-ring {
+      transform: scale(.6);
+    }
+
+    .cur.is-btn .cur-dot {
+      transform: scale(.8);
+    }
+
+    .cur.is-down .cur-ring {
+      transform: scale(1.05);
+    }
+
+    /* Phones */
+    @media (max-width: 767px) {
+      :root {
+        --MH: min(62vh,128vw);
+      }
+
+      .tabs {
+        overflow-x: auto;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+      }
+
+      .tabs::-webkit-scrollbar {
+        display: none;
+      }
+
+      .tab-pill {
+        height: 32px;
+      }
+
+      .tab {
+        height: 32px;
+        padding: 0 13px;
+        font-size: 12px;
+      }
+
+      .rail {
+        left: 10px;
+        top: auto;
+        bottom: calc(4.6vh + 150px);
+        transform: none;
+        padding: 6px;
+        gap: 8px;
+      }
+
+      .rail button {
+        width: 34px;
+        height: 34px;
+      }
+
+      .rail svg {
+        width: 17px;
+        height: 17px;
+      }
+
+      .arrow {
+        display: none;
+      }
+
+      .buy {
+        flex-wrap: wrap;
+        gap: 12px 16px;
+        padding: 12px 16px;
+        border-radius: 20px;
+      }
+
+      .info {
+        flex: 1 1 calc(100% - 86px);
+      }
+
+      .sizes-wrap {
+        flex: 1 1 auto;
+      }
+
+      .colors-wrap {
+        flex: 1 1 auto;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .tab-pill, .tab, .rail button, .arrow, .chip, .dot, .cur-ring, .cur-dot, .cur-lbl {
+        transition-duration: .001ms !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="room" id="room"></div>
+
+  <div class="ghost" id="ghost" aria-hidden="true"><span>F</span><span>I</span><span>T</span></div>
+
+  <nav class="tabs glass" id="tabs" aria-label="Categories">
+    <div class="tab-pill" id="tabPill"></div>
+    <button type="button" class="tab is-active">Tops</button>
+    <button type="button" class="tab">Bottoms</button>
+    <button type="button" class="tab">Outerwear</button>
+    <button type="button" class="tab">Shoes</button>
+    <button type="button" class="tab">Accessories</button>
+  </nav>
+
+  <aside class="rail glass" id="rail" aria-label="Tools">
+    <button type="button" class="is-active" aria-label="Try On">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <path d="M16.2 3.5a1 1 0 0 0-.84.46 3.9 3.9 0 0 1-6.72 0 1 1 0 0 0-.84-.46L3.6 5.2a1 1 0 0 0-.55.56l-1.5 3.8a1 1 0 0 0 .54 1.29l2.41 1.02V20a1 1 0 0 0 1 1h13a1 1 0 0 0 1-1v-8.13l2.41-1.02a1 1 0 0 0 .54-1.29l-1.5-3.8a1 1 0 0 0-.55-.56l-4.2-1.7Z"/>
+      </svg>
+    </button>
+    <button type="button" aria-label="Bag">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="9" cy="20" r="1.4"/>
+        <circle cx="17" cy="20" r="1.4"/>
+        <path d="M3 4h2.5l2.1 10.5a1.5 1.5 0 0 0 1.47 1.2h8.36a1.5 1.5 0 0 0 1.46-1.16L20.5 7.5H6.2"/>
+      </svg>
+    </button>
+    <button type="button" aria-label="Schedule">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/>
+        <path d="M8 3v4M16 3v4M3.5 9.5h17"/>
+      </svg>
+    </button>
+    <button type="button" aria-label="Profile">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="8.5" r="3.8"/>
+        <path d="M5 20c.8-3.4 3.6-5.2 7-5.2s6.2 1.8 7 5.2"/>
+      </svg>
+    </button>
+  </aside>
+
+  <main class="stage" id="stage">
+    <div class="arc" id="arc"></div>
+  </main>
+
+  <div class="model" id="model" aria-hidden="true">
+    <div class="fig" id="mCur"></div>
+    <div class="fig" id="mNext"></div>
+    <div class="grid" id="scanGrid"></div>
+    <div class="scan" id="scanLine"></div>
+  </div>
+
+  <button type="button" class="arrow glass" id="prev" aria-label="Previous garment">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M15 18l-6-6 6-6"/>
+    </svg>
+  </button>
+  <button type="button" class="arrow glass" id="next" aria-label="Next garment">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M9 18l6-6-6-6"/>
+    </svg>
+  </button>
+
+  <section class="buy glass" id="buy" aria-label="Selected garment">
+    <div class="thumb">
+      <div class="thumb-g" id="bThumb"></div>
+    </div>
+    <div class="info">
+      <div class="b-name ln" id="bName"></div>
+      <div class="b-price ln" id="bPrice"></div>
+    </div>
+    <div class="sizes-wrap">
+      <span class="lbl">Size</span>
+      <div class="sizes" id="sizes">
+        <button type="button" class="chip">S</button>
+        <button type="button" class="chip is-active">M</button>
+        <button type="button" class="chip">L</button>
+        <button type="button" class="chip">XL</button>
+      </div>
+    </div>
+    <div class="colors-wrap">
+      <div class="lbl ln" id="bColor"></div>
+      <div class="dots" id="dots"></div>
+    </div>
+  </section>
+
+  <div class="cur" id="cur" aria-hidden="true">
+    <div class="cur-ring"></div>
+    <div class="cur-dot"></div>
+    <span class="cur-lbl cur-try">TRY ON</span>
+    <span class="cur-lbl cur-drag">DRAG</span>
+  </div>
+
+  <script>
+    (() => {
+      const ITEMS = [
+        {n:"Basic T-shirt", p:45,  g:[1.14,3.06],  m:.37,   c:[["White","#f4f2ee"],["Ash","#c9c7c2"],["Charcoal","#3b3c3f"],["Navy","#27324d"]]},
+        {n:"Basic Sweater", p:105, g:[49.7,1.39],  m:25.0,  c:[["White","#f6f4ef"],["Oat","#ddd3c2"],["Sage","#b9c2ae"],["Black","#1f1f21"]]},
+        {n:"Linen Shirt",   p:95,  g:[98.2,3.33],  m:49.86, c:[["White","#f7f6f1"],["Sand","#d9ccb4"],["Sky","#bcd0e2"],["Olive","#717556"]]},
+        {n:"Grey Hoodie",   p:110, g:[1.14,93.3],  m:74.77, c:[["Heather","#a9a9a8"],["Bone","#e6e1d6"],["Forest","#33463a"],["Black","#1f1f21"]]},
+        {n:"Ringer Tee",    p:55,  g:[49.7,95.3],  m:99.35, c:[["White / Black","#f4f2ee"],["Cream / Navy","#efe6d3"],["Grey / Red","#c9c7c2"],["White / Green","#e9efe8"]]}
+      ];
+
+      const EASE = "cubic-bezier(.2,.8,.2,1)";
+      const SCAN_EASE = "cubic-bezier(.65,0,.35,1)";
+      const mod = (n, m) => ((n % m) + m) % m;
+
+      const rmq = window.matchMedia("(prefers-reduced-motion: reduce)");
+      let reduced = rmq.matches;
+      rmq.addEventListener("change", e => { reduced = e.matches; });
+
+      const roomEl = document.getElementById("room");
+      const ghostEl = document.getElementById("ghost");
+      const ghostLetters = Array.from(ghostEl.children);
+      const tabsEl = document.getElementById("tabs");
+      const tabPill = document.getElementById("tabPill");
+      const tabBtns = Array.from(tabsEl.querySelectorAll(".tab"));
+      const railEl = document.getElementById("rail");
+      const railBtns = Array.from(railEl.querySelectorAll("button"));
+      const stageEl = document.getElementById("stage");
+      const arcEl = document.getElementById("arc");
+      const mCur = document.getElementById("mCur");
+      const mNext = document.getElementById("mNext");
+      const scanGrid = document.getElementById("scanGrid");
+      const scanLine = document.getElementById("scanLine");
+      const prevBtn = document.getElementById("prev");
+      const nextBtn = document.getElementById("next");
+      const bThumb = document.getElementById("bThumb");
+      const bName = document.getElementById("bName");
+      const bPrice = document.getElementById("bPrice");
+      const bColor = document.getElementById("bColor");
+      const dotsEl = document.getElementById("dots");
+      const sizesEl = document.getElementById("sizes");
+      const curEl = document.getElementById("cur");
+
+      let W = window.innerWidth;
+      let H = window.innerHeight;
+      let XS = [];
+
+      function measure() {
+        W = window.innerWidth;
+        H = window.innerHeight;
+        const phone = W <= 767;
+        const cw = phone ? Math.min(W * .30, 170) : Math.min(W * .148, H * .33);
+        document.documentElement.style.setProperty("--CW", cw.toFixed(2) + "px");
+        const xs = phone ? [0, .36, .5, .56, .6, .62] : [0, .215, .345, .432, .49, .52];
+        XS = xs.map(v => v * W);
+        positionTabPill(tabsEl.querySelector(".tab.is-active") || tabBtns[0]);
+      }
+
+      function positionTabPill(btn) {
+        if (!btn) return;
+        tabPill.style.width = btn.offsetWidth + "px";
+        tabPill.style.transform = `translateX(${btn.offsetLeft}px)`;
+      }
+
+      function xAt(a) {
+        if (a >= 5) return XS[5];
+        const k = Math.floor(a);
+        return XS[k] + (XS[k + 1] - XS[k]) * (a - k);
+      }
+
+      // Build 10 cards
+      const cards = [];
+      for (let i = 0; i < 10; i++) {
+        const item = ITEMS[i % 5];
+        const card = document.createElement("div");
+        card.className = "card glass";
+        card.dataset.index = String(i);
+
+        const g = document.createElement("div");
+        g.className = "g";
+        g.style.backgroundPosition = `${item.g[0]}% ${item.g[1]}%`;
+
+        const name = document.createElement("div");
+        name.className = "name";
+        name.textContent = item.n;
+
+        const price = document.createElement("div");
+        price.className = "price";
+        price.textContent = "$" + item.p;
+
+        const sheen = document.createElement("div");
+        sheen.className = "sheen";
+
+        card.append(g, name, price, sheen);
+        card.addEventListener("pointerenter", () => {
+          if (reduced) return;
+          sheen.getAnimations().forEach(a => a.cancel());
+          sheen.animate(
+            [{ transform: "translateX(-110%)" }, { transform: "translateX(110%)" }],
+            { duration: 1000, easing: EASE }
+          );
+        });
+
+        arcEl.appendChild(card);
+        cards.push({ el: card, seed: i * 1.37 });
+      }
+
+      // Rolling text helper
+      function rollText(el, text) {
+        const cur = el.lastElementChild;
+        if (cur && cur.textContent === text) return;
+        if (reduced || !cur) {
+          el.innerHTML = "";
+          const s = document.createElement("span");
+          s.textContent = text;
+          el.appendChild(s);
+          return;
+        }
+        const next = document.createElement("span");
+        next.textContent = text;
+        el.appendChild(next);
+
+        const oldAnim = cur.animate(
+          [{ transform: "translateY(0)" }, { transform: "translateY(-110%)" }],
+          { duration: 620, easing: EASE, fill: "forwards" }
+        );
+        oldAnim.onfinish = () => {
+          if (cur.parentNode === el) cur.remove();
+        };
+
+        next.animate(
+          [{ transform: "translateY(110%)" }, { transform: "translateY(0)" }],
+          { duration: 620, easing: EASE }
+        );
+      }
+
+      function updateBuy(item) {
+        bThumb.style.backgroundPosition = `${item.g[0]}% ${item.g[1]}%`;
+        if (!reduced) {
+          bThumb.getAnimations().forEach(a => a.cancel());
+          bThumb.animate(
+            [{ transform: "translateY(70%) scale(.8)" }, { transform: "translateY(0) scale(1)" }],
+            { duration: 650, easing: EASE }
+          );
+        }
+
+        rollText(bName, item.n);
+        rollText(bPrice, "$" + item.p);
+        rollText(bColor, "Color · " + item.c[0][0]);
+
+        dotsEl.innerHTML = "";
+        item.c.forEach(([cname, hex], idx) => {
+          const d = document.createElement("button");
+          d.type = "button";
+          d.className = "dot" + (idx === 0 ? " is-active" : "");
+          d.style.background = hex;
+          d.setAttribute("aria-label", cname);
+          d.addEventListener("click", () => {
+            dotsEl.querySelectorAll(".dot").forEach(x => x.classList.remove("is-active"));
+            d.classList.add("is-active");
+            rollText(bColor, "Color · " + cname);
+          });
+          dotsEl.appendChild(d);
+        });
+      }
+
+      sizesEl.addEventListener("click", e => {
+        const chip = e.target.closest(".chip");
+        if (!chip) return;
+        sizesEl.querySelectorAll(".chip").forEach(c => c.classList.remove("is-active"));
+        chip.classList.add("is-active");
+      });
+
+      // Tabs & Rail
+      tabBtns.forEach(btn => {
+        btn.addEventListener("click", () => {
+          tabBtns.forEach(b => b.classList.remove("is-active"));
+          btn.classList.add("is-active");
+          positionTabPill(btn);
+          target += 5;
+        });
+      });
+
+      railBtns.forEach(btn => {
+        btn.addEventListener("click", () => {
+          railBtns.forEach(b => b.classList.remove("is-active"));
+          btn.classList.add("is-active");
+        });
+      });
+
+      // Try-on scan
+      let shown = -1;
+      let scanAnims = [];
+      let scanToken = 0;
+
+      function cancelScan() {
+        scanAnims.forEach(a => a.cancel());
+        scanAnims = [];
+      }
+
+      function tryOn(idx) {
+        shown = idx;
+        const item = ITEMS[idx];
+        const token = ++scanToken;
+        updateBuy(item);
+        cancelScan();
+
+        if (reduced) {
+          mCur.style.backgroundPositionX = item.m + "%";
+          mCur.style.opacity = "1";
+          return;
+        }
+
+        mNext.style.backgroundPositionX = item.m + "%";
+
+        const aClip = mNext.animate(
+          [{ clipPath: "inset(0 0 100% 0)" }, { clipPath: "inset(0 0 0% 0)" }],
+          { duration: 950, easing: SCAN_EASE, fill: "forwards" }
+        );
+        const aGrid = scanGrid.animate(
+          [
+            { clipPath: "inset(0 0 100% 0)", offset: 0 },
+            { clipPath: "inset(0 0 0 0)", offset: .5 },
+            { clipPath: "inset(100% 0 0 0)", offset: 1 }
+          ],
+          { duration: 1092, easing: SCAN_EASE }
+        );
+        const aScan = scanLine.animate(
+          [
+            { top: "0%", transform: "scaleX(.2)", opacity: 0, offset: 0 },
+            { top: "6%", transform: "scaleX(1)", opacity: 1, offset: .08 },
+            { top: "94%", transform: "scaleX(1)", opacity: 1, offset: .92 },
+            { top: "100%", transform: "scaleX(.2)", opacity: 0, offset: 1 }
+          ],
+          { duration: 950, easing: SCAN_EASE }
+        );
+        const aSettle = mNext.animate(
+          [{ transform: "scale(1.012)" }, { transform: "scale(1)" }],
+          { duration: 1250, easing: "ease-out" }
+        );
+
+        scanAnims = [aClip, aGrid, aScan, aSettle];
+        aClip.onfinish = () => {
+          if (token !== scanToken) return;
+          mCur.style.backgroundPositionX = item.m + "%";
+          mCur.style.opacity = "1";
+          cancelScan();
+        };
+      }
+
+      // Arc state & input
+      let pos = 0;
+      let target = 0;
+      let intro = reduced ? 1 : 0;
+
+      let dragging = false;
+      let startX = 0;
+      let startY = 0;
+      let p0 = 0;
+      let moved = 0;
+      let lastX = 0;
+      let lastT = 0;
+      let vx = 0;
+      let downCard = null;
+
+      // Pointer & cursor
+      let tx = W * .5;
+      let ty = H * .5;
+      let cx = tx;
+      let cy = ty;
+      let tsx = 0;
+      let tsy = 0;
+      let sx = 0;
+      let sy = 0;
+      let curVisible = false;
+      let hoverTarget = null;
+
+      function updateCursorClass() {
+        curEl.classList.remove("is-try", "is-drag", "is-btn");
+        if (dragging) {
+          curEl.classList.add("is-drag");
+          return;
+        }
+        if (!hoverTarget) return;
+        if (hoverTarget.closest("button")) {
+          curEl.classList.add("is-btn");
+        } else if (hoverTarget.closest(".card")) {
+          curEl.classList.add("is-try");
+        } else if (hoverTarget.closest(".stage")) {
+          curEl.classList.add("is-drag");
+        }
+      }
+
+      stageEl.addEventListener("pointerdown", e => {
+        if (e.button !== 0 && e.pointerType === "mouse") return;
+        dragging = true;
+        startX = e.clientX;
+        startY = e.clientY;
+        p0 = pos;
+        moved = 0;
+        lastX = e.clientX;
+        lastT = performance.now();
+        vx = 0;
+        downCard = e.target.closest(".card");
+        curEl.classList.add("is-down");
+        updateCursorClass();
+      });
+
+      window.addEventListener("pointerdown", e => {
+        if (e.pointerType === "mouse") curEl.classList.add("is-down");
+      });
+
+      window.addEventListener("pointermove", e => {
+        tx = e.clientX;
+        ty = e.clientY;
+        tsx = tx / W - .5;
+        tsy = ty / H - .5;
+        hoverTarget = e.target;
+
+        if (!curVisible && e.pointerType === "mouse") {
+          curVisible = true;
+          cx = tx;
+          cy = ty;
+          curEl.style.opacity = "1";
+        }
+
+        if (dragging) {
+          const dx = e.clientX - startX;
+          moved = Math.hypot(dx, e.clientY - startY);
+          pos = p0 - dx / XS[1];
+          const now = performance.now();
+          const dt = now - lastT;
+          if (dt > 0) {
+            const inst = (e.clientX - lastX) / dt;
+            vx = vx * .6 + inst * .4;
+            lastX = e.clientX;
+            lastT = now;
+          }
+        }
+
+        updateCursorClass();
+      });
+
+      function endDrag(e) {
+        curEl.classList.remove("is-down");
+        if (!dragging) return;
+        dragging = false;
+        if (moved < 6 && downCard) {
+          const idx = Number(downCard.dataset.index);
+          const u = mod(idx - pos + 5, 10) - 5;
+          target = Math.round(pos + u);
+        } else {
+          if (performance.now() - lastT > 80) vx = 0;
+          target = Math.round(pos - vx * 3.2);
+        }
+        downCard = null;
+        if (e && e.target) hoverTarget = e.target;
+        updateCursorClass();
+      }
+
+      window.addEventListener("pointerup", endDrag);
+      window.addEventListener("pointercancel", endDrag);
+
+      document.addEventListener("mouseleave", () => {
+        curVisible = false;
+        curEl.style.opacity = "0";
+      });
+
+      let wheelAcc = 0;
+      let lastWheel = 0;
+      window.addEventListener("wheel", e => {
+        const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+        wheelAcc += d;
+        const now = performance.now();
+        if (Math.abs(wheelAcc) >= 60 && now - lastWheel >= 260) {
+          target += wheelAcc > 0 ? 1 : -1;
+          wheelAcc = 0;
+          lastWheel = now;
+        }
+      }, { passive: true });
+
+      window.addEventListener("keydown", e => {
+        if (e.key === "ArrowLeft") target -= 1;
+        else if (e.key === "ArrowRight") target += 1;
+      });
+
+      prevBtn.addEventListener("click", () => { target -= 1; });
+      nextBtn.addEventListener("click", () => { target += 1; });
+
+      window.addEventListener("resize", measure);
+      measure();
+      document.fonts?.ready.then(() => {
+        positionTabPill(tabsEl.querySelector(".tab.is-active") || tabBtns[0]);
+      });
+
+      // Main animation loop
+      function frame(now) {
+        const t = now * .001;
+
+        if (reduced) {
+          intro = 1;
+          if (!dragging) pos = target;
+        } else {
+          if (intro < 1) intro = Math.min(1, intro + .012);
+          if (!dragging) pos += (target - pos) * .11;
+        }
+
+        const ie = 1 - Math.pow(1 - intro, 3);
+
+        sx += (tsx - sx) * .06;
+        sy += (tsy - sy) * .06;
+
+        cx += (tx - cx) * .22;
+        cy += (ty - cy) * .22;
+        curEl.style.transform = `translate3d(${cx.toFixed(2)}px, ${cy.toFixed(2)}px, 0)`;
+
+        // Parallax
+        roomEl.style.transform = `translate3d(${(-sx * 22).toFixed(2)}px, ${(-sy * 14).toFixed(2)}px, 0) scale(${(1.08 - .03 * ie).toFixed(4)})`;
+        ghostEl.style.transform = `translate(calc(-50% - ${(sx * 40).toFixed(2)}px), ${(-sy * 16).toFixed(2)}px)`;
+        for (let i = 0; i < ghostLetters.length; i++) {
+          ghostLetters[i].style.transform = `translateY(${((1 - ie) * (60 + 30 * i)).toFixed(2)}px)`;
+        }
+
+        // Arc cards
+        for (let i = 0; i < 10; i++) {
+          const c = cards[i];
+          const u = mod(i - pos + 5, 10) - 5;
+          const a = Math.abs(u);
+          const sg = u < 0 ? -1 : (u > 0 ? 1 : 0);
+
+          const x = sg * xAt(a) * ie;
+          let s, z, ry, op, blur = 0;
+
+          if (a < 1) {
+            s = .55 + .45 * a;
+            z = -260 * (1 - a);
+            op = a;
+            ry = -sg * 16 * a;
+          } else {
+            s = 1 / (1 + .3 * Math.pow(a - 1, 1.15));
+            z = -110 * (a - 1);
+            ry = -sg * (16 + 9 * Math.min(2, a - 1));
+            blur = Math.max(0, a - 1.6) * 2.4;
+            op = a > 3.4 ? Math.max(0, 1 - (a - 3.4) / .8) : 1;
+          }
+
+          ry += sx * 10;
+          const bob = reduced ? 0 : Math.sin(t * 1.1 + c.seed) * H * .006 * Math.min(1, a);
+          const y = bob - (1 - s) * H * .04;
+          const finalOp = op * ie;
+
+          if (finalOp < .01) {
+            c.el.style.visibility = "hidden";
+            c.el.style.opacity = "0";
+          } else {
+            c.el.style.visibility = "visible";
+            c.el.style.opacity = finalOp.toFixed(4);
+            c.el.style.zIndex = String(a < 1 ? 1 : Math.round(100 - 10 * a));
+            c.el.style.filter = blur > .05 ? `blur(${blur.toFixed(2)}px)` : "";
+            c.el.style.transform = `translate(${x.toFixed(2)}px, ${y.toFixed(2)}px) perspective(1300px) translateZ(${z.toFixed(2)}px) rotateY(${ry.toFixed(2)}deg) rotateX(${(-sy * 6).toFixed(2)}deg) scale(${(s * (.6 + .4 * ie)).toFixed(4)})`;
+          }
+        }
+
+        // Settle check
+        if (!dragging && Math.abs(target - pos) < .02) {
+          const itemIdx = mod(Math.round(target), 5);
+          if (itemIdx !== shown) {
+            tryOn(itemIdx);
+          }
+        }
+
+        requestAnimationFrame(frame);
+      }
+
+      requestAnimationFrame(frame);
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,6 @@
+{
+  "name": "Meridian Atelier",
+  "description": "Interactive 3D clothing rail storefront with shadcn/ui, Tailwind CSS, TypeScript, and high-thinking wardrobe styling.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
