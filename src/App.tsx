@@ -106,7 +106,7 @@ function StorefrontShell() {
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
   const [category, setCategory] = React.useState<CategoryFilter>("all");
   const [hangerMode, setHangerMode] = React.useState<"none" | "wood" | "matte">("none");
-  const [autoplay, setAutoplay] = React.useState(true);
+  const [autoplay, setAutoplay] = React.useState(false);
   const [inspectedIndex, setInspectedIndex] = React.useState<number | null>(null);
   const [selectedSizes, setSelectedSizes] = React.useState<Record<string, GarmentSize>>(() =>
     readStorageJson(STORAGE_KEYS.sizes, {}),
