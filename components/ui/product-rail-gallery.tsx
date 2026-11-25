@@ -1229,8 +1229,7 @@ export function ClothingRailHero({
                 aria-label={item.name}
                 aria-describedby={`${uid}-caption`}
                 aria-pressed={turned}
-                style={!reduced ? { animationDelay: `${Math.min(i * 32, 240)}ms` } : undefined}
-                className={`absolute inset-0 cursor-pointer rounded-xl outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring ${!reduced ? "rail-hero-enter" : ""}`}
+                className="absolute inset-0 cursor-pointer rounded-xl outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring"
                 onFocus={() => { setFocusIndex(i); if (pointer.current.id < 0) { stop(); choose(i); } }}
                 onClick={(event) => { const pending = pendingOpen.current; pendingOpen.current = -1; if (event.detail === 0 || pending === i) open(i); }}
               >
