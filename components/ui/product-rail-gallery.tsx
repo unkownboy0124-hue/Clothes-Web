@@ -569,20 +569,36 @@ function Photo({
   );
 }
 
+const FLOW_SPEED = -24;
+
+function wrapAround(val: number, center: number, span: number) {
+  if (span <= 0) return val;
+  const min = center - span / 2;
+  return ((((val - min) % span) + span) % span) + min;
+}
+
+function nearestEquivalentX(x: number, target: number, span: number) {
+  if (span <= 0) return x;
+  const diff = x - target;
+  return target + diff - Math.round(diff / span) * span;
+}
+
 type Sim = {
-  x: number[]; vx: number[]; tx: number[]; px: number[];
+  x: number[]; vx: number[]; tx: number[]; baseTx: number[]; px: number[];
   turn: number[]; vturn: number[]; tturn: number[];
   swing: number[]; vswing: number[];
   tag: number[]; vtag: number[];
+  flow: number; flowVel: number; wrapSpan: number; mountedAt: number;
   drag: number; grab: number; free: number; last: number; raf: number;
 };
 
 function emptySim(): Sim {
   return {
-    x: [], vx: [], tx: [], px: [],
+    x: [], vx: [], tx: [], baseTx: [], px: [],
     turn: [], vturn: [], tturn: [],
     swing: [], vswing: [],
     tag: [], vtag: [],
+    flow: 0, flowVel: 0, wrapSpan: 0, mountedAt: 0,
     drag: -1, grab: 0, free: 0, last: 0, raf: 0,
   };
 }
@@ -743,10 +759,39 @@ export function ClothingRailHero({
       s.last = 0;
       return;
     }
+    if (!s.mountedAt) s.mountedAt = now;
     const n = live.current.count;
     const dt = s.last ? Math.min(0.034, (now - s.last) / 1000) : 1 / 60;
     s.last = now;
     const { h, width, carousel } = live.current.size;
+    const settledIntro = now - s.mountedAt >= 650;
+    const flowAllowed =
+      live.current.playing &&
+      !live.current.reduced &&
+      !live.current.engaged &&
+      live.current.openIndex === null &&
+      s.drag < 0 &&
+      n > 0 &&
+      width > 0;
+    const targetSpeed = flowAllowed && settledIntro ? FLOW_SPEED : 0;
+    const speedBlend = 1 - Math.exp(-3.2 * dt);
+    s.flowVel += (targetSpeed - s.flowVel) * speedBlend;
+    if (!flowAllowed && Math.abs(s.flowVel) < 0.05) s.flowVel = 0;
+
+    const useWrap = s.wrapSpan > 0 && !(carousel && live.current.engaged);
+    if (Math.abs(s.flowVel) > 0.01 && useWrap) {
+      s.flow += s.flowVel * dt;
+      if (s.flow <= -s.wrapSpan) s.flow += s.wrapSpan;
+      else if (s.flow > 0) s.flow -= s.wrapSpan;
+      for (let i = 0; i < n; i++) {
+        const newTx = wrapAround((s.baseTx[i] ?? 0) + s.flow, width / 2, s.wrapSpan);
+        const oldTx = s.tx[i] ?? newTx;
+        if (Math.abs(newTx - oldTx) > s.wrapSpan * 0.5) {
+          s.x[i] = (s.x[i] ?? newTx) + (newTx - oldTx);
+        }
+        s.tx[i] = newTx;
+      }
+    }
 
     let busy = false;
     const sub = 2;
@@ -758,7 +803,7 @@ export function ClothingRailHero({
           const restoring = now > s.free;
           const stiff = restoring ? 130 : 0;
           const damp = restoring ? 2 * Math.sqrt(130) * 0.86 : 3.2;
-          const ax = -stiff * ((s.x[i] ?? 0) - (s.tx[i] ?? 0)) - damp * before;
+          const ax = -stiff * ((s.x[i] ?? 0) - (s.tx[i] ?? 0)) - damp * (before - s.flowVel);
           s.vx[i] = before + ax * sdt;
           s.x[i] = (s.x[i] ?? 0) + (s.vx[i] ?? 0) * sdt;
         }
@@ -778,7 +823,9 @@ export function ClothingRailHero({
           const a = s.x[i] ?? 0;
           const b = s.x[i + 1] ?? 0;
           const minGap = (footprint(h, s.turn[i] ?? REST, live.current.sideWidths[i]) + footprint(h, s.turn[i + 1] ?? REST, live.current.sideWidths[i + 1])) / 2 + h * 0.012;
-          const overlap = minGap - (b - a);
+          let gap = b - a;
+          if (useWrap && gap < -s.wrapSpan * 0.5) gap += s.wrapSpan;
+          const overlap = minGap - gap;
           if (overlap <= 0) continue;
           if (i === s.drag) s.x[i + 1] = b + overlap;
           else if (i + 1 === s.drag) s.x[i] = a - overlap;
@@ -791,8 +838,21 @@ export function ClothingRailHero({
             if (i + 1 !== s.drag) s.vx[i + 1] = shared;
           }
         }
+        if (useWrap && n > 2) {
+          const i = n - 1;
+          const a = s.x[i] ?? 0;
+          const b = s.x[0] ?? 0;
+          const minGap = (footprint(h, s.turn[i] ?? REST, live.current.sideWidths[i]) + footprint(h, s.turn[0] ?? REST, live.current.sideWidths[0])) / 2 + h * 0.012;
+          const forwardGap = ((((b - a) % s.wrapSpan) + s.wrapSpan) % s.wrapSpan);
+          if (forwardGap < minGap) {
+            const overlap = minGap - forwardGap;
+            if (i === s.drag) s.x[0] = b + overlap;
+            else if (0 === s.drag) s.x[i] = a - overlap;
+            else { s.x[i] = a - overlap / 2; s.x[0] = b + overlap / 2; }
+          }
+        }
       }
-      if (!carousel && n > 0) {
+      if (!carousel && !useWrap && n > 0) {
         const edge = h * 0.06;
         const first = edge + footprint(h, s.turn[0] ?? REST, live.current.sideWidths[0]) / 2;
         const last = width - edge - footprint(h, s.turn[n - 1] ?? REST, live.current.sideWidths[n - 1]) / 2;
@@ -802,9 +862,9 @@ export function ClothingRailHero({
     }
     for (let i = 0; i < n; i++) {
       paint(i);
-      if (Math.abs(s.vx[i] ?? 0) > 0.4 || (now > s.free && Math.abs((s.x[i] ?? 0) - (s.tx[i] ?? 0)) > 0.25) || Math.abs((s.turn[i] ?? 0) - (s.tturn[i] ?? 0)) > 0.05 || Math.abs(s.vturn[i] ?? 0) > 0.05 || Math.abs(s.swing[i] ?? 0) > 0.02 || Math.abs(s.vswing[i] ?? 0) > 0.05 || Math.abs((s.tag[i] ?? 0)) > 0.05 || Math.abs(s.vtag[i] ?? 0) > 0.08) busy = true;
+      if (Math.abs((s.vx[i] ?? 0) - s.flowVel) > 0.4 || (now > s.free && Math.abs((s.x[i] ?? 0) - (s.tx[i] ?? 0)) > 0.25) || Math.abs((s.turn[i] ?? 0) - (s.tturn[i] ?? 0)) > 0.05 || Math.abs(s.vturn[i] ?? 0) > 0.05 || Math.abs(s.swing[i] ?? 0) > 0.02 || Math.abs(s.vswing[i] ?? 0) > 0.05 || Math.abs((s.tag[i] ?? 0)) > 0.05 || Math.abs(s.vtag[i] ?? 0) > 0.08) busy = true;
     }
-    if (s.drag >= 0 || now < s.free) busy = true;
+    if (s.drag >= 0 || now < s.free || flowAllowed || Math.abs(s.flowVel) > 0.05) busy = true;
     if (busy) s.raf = requestAnimationFrame(step);
     else {
       s.raf = 0; s.last = 0;
@@ -856,9 +916,30 @@ export function ClothingRailHero({
     const s = sim.current;
     const front = size.carousel ? (active ?? live.current.carouselIndex) : active;
     const xs = targets(size.h, size.width, size.carousel, front);
+    const boxW = size.h * ASPECT;
+    const restTotal = items.reduce((sum, _, idx) => sum + footprint(size.h, REST, sideWidths[idx]) + size.h * GAP, 0);
+    const activeExtra = footprint(size.h, 0, 0.4) - footprint(size.h, REST, 0.3);
+    const span = Math.max(size.width + boxW * 1.08, restTotal + activeExtra + size.h * 0.2);
+    s.wrapSpan = span;
+    if (size.carousel && engaged) {
+      s.flow = 0;
+      s.flowVel = 0;
+    } else if (s.flow <= -span || s.flow > 0) {
+      s.flow = ((s.flow % span) + span) % span - span;
+    }
+    const useWrap = span > 0 && !(size.carousel && engaged);
     const fresh = s.x.length !== count;
     for (let i = 0; i < count; i++) {
-      s.tx[i] = (xs[i] ?? 0) + (size.carousel ? pointer.current.swipe : 0);
+      const base = (xs[i] ?? 0) + (size.carousel ? pointer.current.swipe : 0);
+      s.baseTx[i] = base;
+      const nextTx = useWrap ? wrapAround(base + s.flow, size.width / 2, span) : base;
+      const prevTx = s.tx[i] ?? nextTx;
+      if (!fresh && useWrap && Math.abs(nextTx - prevTx) > span * 0.5) {
+        s.x[i] = (s.x[i] ?? nextTx) + (nextTx - prevTx);
+      } else if (!fresh && size.carousel && engaged) {
+        s.x[i] = nearestEquivalentX(s.x[i] ?? nextTx, nextTx, span);
+      }
+      s.tx[i] = nextTx;
       const itemFace = railFaceById[items[i]?.id ?? ""] ?? "front";
       s.tturn[i] = i === front ? (itemFace === "back" ? 180 : 0) : REST;
       if (fresh || reduced) {
@@ -869,10 +950,11 @@ export function ClothingRailHero({
     }
     if (fresh) {
       s.x.length = count;
+      s.baseTx.length = count;
       for (let i = 0; i < count; i++) paint(i);
     }
     kick();
-  }, [size, active, count, reduced, targets, paint, kick, railFaceById, items]);
+  }, [size, active, count, reduced, engaged, targets, paint, kick, railFaceById, items, sideWidths]);
 
   const brushed = React.useRef(false);
   React.useEffect(() => {
@@ -979,6 +1061,8 @@ export function ClothingRailHero({
           s.free = now + 900;
           kick();
         } else if (live.current.size.carousel) {
+          s.flow = 0;
+          s.flowVel = 0;
           p.swipe = dx;
           const xs = targets(live.current.size.h, live.current.size.width, true, live.current.active ?? live.current.carouselIndex);
           for (let i = 0; i < live.current.count; i++) s.tx[i] = (xs[i] ?? 0) + dx;

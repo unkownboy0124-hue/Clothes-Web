@@ -1,56 +1,49 @@
 import * as React from "react";
-import { createPortal } from "react-dom";
+import {
+  ArrowRight,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Maximize2,
+  Rotate3d,
+  ShoppingBag,
+} from "lucide-react";
 import type { RailGarment } from "@/components/ui/product-rail-gallery";
 import type { GarmentSize } from "@/components/product-inspector-modal";
 import { GarmentThumbnail } from "@/components/garment-thumbnail";
-import { matchesCategory, SIZES, type CategoryFilter } from "@/lib/catalog-data";
+import {
+  matchesCategory,
+  SIZES,
+  type CategoryFilter,
+} from "@/lib/catalog-data";
 import {
   getColorName,
   getColorOptionsForItem,
   preloadTintedGarmentAngles,
 } from "@/lib/garment-colors";
-import { useRouter } from "@/lib/router";
+import { Link } from "@/lib/router";
+import { Button } from "@/components/ui/button";
 
-const MODEL_POSE_X: Record<string, number> = {
-  "bone-tee": 0.37,
-  "cc-graphic": 99.35,
-  "oxford-sky": 49.86,
-  "cardigan-olive": 25.0,
-  "hoodie-heather": 74.77,
-  "sweat-lilac": 25.0,
-  "polo-forest": 49.86,
-  "henley-brick": 25.0,
-  breton: 99.35,
-  "oversized-ochre": 0.37,
-};
+type StageView = "front" | "side" | "back";
 
-function getModelPoseX(item: RailGarment): number {
-  if (item.id in MODEL_POSE_X) return MODEL_POSE_X[item.id];
-  if (item.kind === "shirt") return 49.86;
-  if (item.kind === "hoodie") return 74.77;
-  if (item.kind === "knit") return 25.0;
-  return 0.37;
-}
-
-const TABS: ReadonlyArray<{ key: CategoryFilter; label: string }> = [
+const CATEGORY_TABS: ReadonlyArray<{ key: CategoryFilter; label: string }> = [
   { key: "all", label: "All (10)" },
   { key: "tee", label: "Tees & Polo" },
   { key: "knit", label: "Knit & Fleece" },
   { key: "shirting", label: "Shirting" },
 ];
 
-const EASE = "cubic-bezier(.2,.8,.2,1)";
-const SCAN_EASE = "cubic-bezier(.65,0,.35,1)";
 const mod = (n: number, m: number) => ((n % m) + m) % m;
 
 function circularOffset(index: number, pos: number, count: number): number {
-  if (count <= 1) return 1;
+  if (count <= 1) return 0;
   const half = count / 2;
   return mod(index - pos + half, count) - half;
 }
 
 export function SpatialTryOnSection({
   items,
+  selectedColors,
   selectedSizes,
   getItemColor,
   onColorChange,
@@ -59,6 +52,7 @@ export function SpatialTryOnSection({
   onOpenModal,
 }: {
   items: RailGarment[];
+  selectedColors: Record<string, string>;
   selectedSizes: Record<string, GarmentSize>;
   getItemColor: (item: RailGarment) => string;
   onColorChange: (id: string, colorHex: string) => void;
@@ -71,60 +65,42 @@ export function SpatialTryOnSection({
   ) => void;
   onOpenModal: (item: RailGarment, initialAngle?: number) => void;
 }) {
-  const { navigate } = useRouter();
-  const sectionRef = React.useRef<HTMLElement | null>(null);
-  const roomRef = React.useRef<HTMLDivElement | null>(null);
-  const ghostRef = React.useRef<HTMLDivElement | null>(null);
-  const tabsRef = React.useRef<HTMLElement | null>(null);
-  const tabPillRef = React.useRef<HTMLDivElement | null>(null);
-  const tabBtnRefs = React.useRef<(HTMLButtonElement | null)[]>([]);
-  const stageRef = React.useRef<HTMLDivElement | null>(null);
-  const cardRefs = React.useRef<(HTMLDivElement | null)[]>([]);
-  const sheenRefs = React.useRef<(HTMLDivElement | null)[]>([]);
-  const mCurRef = React.useRef<HTMLDivElement | null>(null);
-  const mNextRef = React.useRef<HTMLDivElement | null>(null);
-  const scanGridRef = React.useRef<HTMLDivElement | null>(null);
-  const scanLineRef = React.useRef<HTMLDivElement | null>(null);
-  const bThumbWrapRef = React.useRef<HTMLDivElement | null>(null);
-  const bThumbRef = React.useRef<HTMLDivElement | null>(null);
-  const bNameRef = React.useRef<HTMLDivElement | null>(null);
-  const bPriceRef = React.useRef<HTMLDivElement | null>(null);
-  const bColorRef = React.useRef<HTMLDivElement | null>(null);
-  const curRef = React.useRef<HTMLDivElement | null>(null);
-
-  const [activeTab, setActiveTab] = React.useState(0);
-  const activeTabRef = React.useRef(0);
-  const [activeTool, setActiveTool] = React.useState(0);
-  const [currentItemIdx, setCurrentItemIdx] = React.useState(0);
-  const [mounted, setMounted] = React.useState(false);
+  const [tabCategory, setTabCategory] = React.useState<CategoryFilter>("all");
+  const [activeIdx, setActiveIdx] = React.useState(0);
+  const [stageView, setStageView] = React.useState<StageView>("front");
+  const [reducedMotion, setReducedMotion] = React.useState(false);
+  const [scanCycle, setScanCycle] = React.useState(0);
   const [justAdded, setJustAdded] = React.useState(false);
   const addedTimerRef = React.useRef<number | null>(null);
 
-  const visibleItems = React.useMemo(() => {
-    const cat = TABS[activeTab]?.key ?? "all";
-    const list = items.filter((item) => matchesCategory(item, cat));
-    return list.length ? list : items;
-  }, [activeTab, items]);
-
-  const visibleItemsRef = React.useRef<RailGarment[]>(visibleItems);
-  visibleItemsRef.current = visibleItems;
-
+  const visibleItems = React.useMemo(
+    () => items.filter((item) => matchesCategory(item, tabCategory)),
+    [items, tabCategory],
+  );
   const count = visibleItems.length;
-  const safeIdx = count > 0 ? mod(currentItemIdx, count) : 0;
-  const activeItem = visibleItems[safeIdx] ?? items[0];
+  const safeActiveIdx = count > 0 ? mod(activeIdx, count) : 0;
+  const activeItem = visibleItems[safeActiveIdx] ?? items[0];
 
-  const getItemColorRef = React.useRef(getItemColor);
-  getItemColorRef.current = getItemColor;
+  const sectionRef = React.useRef<HTMLElement | null>(null);
+  const stageRef = React.useRef<HTMLDivElement | null>(null);
+  const roomRef = React.useRef<HTMLDivElement | null>(null);
+  const cardRefs = React.useRef<(HTMLButtonElement | null)[]>([]);
+  const centerWrapRef = React.useRef<HTMLDivElement | null>(null);
+  const scanNextRef = React.useRef<HTMLDivElement | null>(null);
+  const scanGridRef = React.useRef<HTMLDivElement | null>(null);
+  const scanLineRef = React.useRef<HTMLDivElement | null>(null);
+  const thumbDockRef = React.useRef<HTMLDivElement | null>(null);
 
-  const engineRef = React.useRef({
-    W: 1200,
-    H: 800,
-    XS: [0, 258, 414, 518, 588, 624],
-    reduced: false,
+  const tabsContainerRef = React.useRef<HTMLDivElement | null>(null);
+  const tabBtnRefs = React.useRef<Record<string, HTMLButtonElement | null>>({});
+  const [pillStyle, setPillStyle] = React.useState<{ left: number; width: number }>({
+    left: 4,
+    width: 72,
+  });
+
+  const simRef = React.useRef({
     pos: 0,
     target: 0,
-    count: visibleItems.length,
-    intro: 0,
     dragging: false,
     startX: 0,
     startY: 0,
@@ -133,409 +109,172 @@ export function SpatialTryOnSection({
     lastX: 0,
     lastT: 0,
     vx: 0,
-    downCardIdx: null as number | null,
-    tx: 600,
-    ty: 400,
-    cx: 600,
-    cy: 400,
-    tsx: 0,
-    tsy: 0,
+    downIdx: null as number | null,
     sx: 0,
     sy: 0,
-    curVisible: false,
-    hoverTarget: null as EventTarget | null,
-    shownKey: "",
-    scanAnims: [] as Animation[],
-    scanToken: 0,
-    wheelAcc: 0,
-    lastWheel: 0,
-    inView: false,
-    raf: 0,
+    tsx: 0,
+    tsy: 0,
+    xs: [0, 180, 290, 365, 415, 445],
+    cardW: 168,
+    stageW: 960,
+    stageH: 560,
+    settledIdx: 0,
+    count: 10,
   });
 
+  // Track reduced motion
   React.useEffect(() => {
-    setMounted(true);
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const sync = () => setReducedMotion(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+
+  // Keep active index and sim count synced when category tabs filter
+  React.useEffect(() => {
+    const s = simRef.current;
+    s.count = count;
+    s.pos = 0;
+    s.target = 0;
+    s.settledIdx = 0;
+    cardRefs.current.length = count;
+    setActiveIdx(0);
+    setStageView("front");
+    setScanCycle((c) => c + 1);
+  }, [count, tabCategory]);
+
+  React.useEffect(() => {
     return () => {
       if (addedTimerRef.current !== null) window.clearTimeout(addedTimerRef.current);
     };
   }, []);
 
-  const positionTabPill = React.useCallback((idx: number) => {
-    const btn = tabBtnRefs.current[idx];
-    const pill = tabPillRef.current;
-    if (!btn || !pill) return;
-    pill.style.width = `${btn.offsetWidth}px`;
-    pill.style.transform = `translateX(${btn.offsetLeft}px)`;
-  }, []);
-
-  const rollText = React.useCallback((el: HTMLDivElement | null, text: string) => {
-    if (!el) return;
-    const reduced = engineRef.current.reduced;
-    const cur = el.lastElementChild;
-    if (cur && cur.textContent === text) return;
-    if (reduced || !cur) {
-      el.innerHTML = "";
-      const s = document.createElement("span");
-      s.textContent = text;
-      el.appendChild(s);
-      return;
-    }
-    const next = document.createElement("span");
-    next.textContent = text;
-    el.appendChild(next);
-
-    const oldAnim = cur.animate(
-      [{ transform: "translateY(0)" }, { transform: "translateY(-110%)" }],
-      { duration: 620, easing: EASE, fill: "forwards" },
-    );
-    oldAnim.onfinish = () => {
-      if (cur.parentNode === el) cur.remove();
-    };
-
-    next.animate(
-      [{ transform: "translateY(110%)" }, { transform: "translateY(0)" }],
-      { duration: 620, easing: EASE },
-    );
-  }, []);
-
-  const updateBuy = React.useCallback(
-    (itemIdx: number, item: RailGarment) => {
-      const thumb = bThumbRef.current;
-      if (thumb && !engineRef.current.reduced) {
-        thumb.getAnimations().forEach((a) => a.cancel());
-        thumb.animate(
-          [{ transform: "translateY(70%) scale(.8)" }, { transform: "translateY(0) scale(1)" }],
-          { duration: 650, easing: EASE },
-        );
-      }
-      const activeColorHex = getItemColorRef.current(item);
-      rollText(bNameRef.current, item.name);
-      rollText(bPriceRef.current, item.tag ?? "$0");
-      rollText(bColorRef.current, `Color · ${getColorName(activeColorHex)}`);
-      setCurrentItemIdx(itemIdx);
-    },
-    [rollText],
-  );
-
-  const cancelScan = React.useCallback(() => {
-    const s = engineRef.current;
-    s.scanAnims.forEach((a) => a.cancel());
-    s.scanAnims = [];
-  }, []);
-
-  const tryOn = React.useCallback(
-    (idx: number) => {
-      const s = engineRef.current;
-      const list = visibleItemsRef.current;
-      const item = list[idx];
-      const mCur = mCurRef.current;
-      const mNext = mNextRef.current;
-      const scanGrid = scanGridRef.current;
-      const scanLine = scanLineRef.current;
-      if (!item || !mCur || !mNext) return;
-
-      const poseX = getModelPoseX(item);
-      s.shownKey = `${item.id}:${idx}`;
-      const token = ++s.scanToken;
-      updateBuy(idx, item);
-      cancelScan();
-
-      preloadTintedGarmentAngles(
-        [item.image, item.sideImage, item.backImage],
-        item.color,
-        getItemColorRef.current(item),
-        0.11,
-      );
-
-      if (s.reduced) {
-        mCur.style.backgroundPositionX = `${poseX}%`;
-        mCur.style.opacity = "1";
-        return;
-      }
-
-      mNext.style.backgroundPositionX = `${poseX}%`;
-
-      const aClip = mNext.animate(
-        [{ clipPath: "inset(0 0 100% 0)" }, { clipPath: "inset(0 0 0% 0)" }],
-        { duration: 950, easing: SCAN_EASE, fill: "forwards" },
-      );
-      const aSettle = mNext.animate(
-        [{ transform: "scale(1.012)" }, { transform: "scale(1)" }],
-        { duration: 1250, easing: "ease-out" },
-      );
-
-      const anims: Animation[] = [aClip, aSettle];
-      if (scanGrid) {
-        anims.push(
-          scanGrid.animate(
-            [
-              { clipPath: "inset(0 0 100% 0)", offset: 0 },
-              { clipPath: "inset(0 0 0 0)", offset: 0.5 },
-              { clipPath: "inset(100% 0 0 0)", offset: 1 },
-            ],
-            { duration: 1092, easing: SCAN_EASE },
-          ),
-        );
-      }
-      if (scanLine) {
-        anims.push(
-          scanLine.animate(
-            [
-              { top: "0%", transform: "scaleX(.2)", opacity: 0, offset: 0 },
-              { top: "6%", transform: "scaleX(1)", opacity: 1, offset: 0.08 },
-              { top: "94%", transform: "scaleX(1)", opacity: 1, offset: 0.92 },
-              { top: "100%", transform: "scaleX(.2)", opacity: 0, offset: 1 },
-            ],
-            { duration: 950, easing: SCAN_EASE },
-          ),
-        );
-      }
-
-      s.scanAnims = anims;
-      aClip.onfinish = () => {
-        if (token !== s.scanToken) return;
-        mCur.style.backgroundPositionX = `${poseX}%`;
-        mCur.style.opacity = "1";
-        cancelScan();
-      };
-    },
-    [cancelScan, updateBuy],
-  );
-
-  // Sync engine count when category tab changes
+  // Preload active item angles + active color immediately
   React.useEffect(() => {
-    const s = engineRef.current;
-    s.count = count;
-    s.pos = 0;
-    s.target = 0;
-    s.shownKey = "";
-    cardRefs.current.length = count;
-    sheenRefs.current.length = count;
-    setCurrentItemIdx(0);
-  }, [count, activeTab]);
+    if (!activeItem) return;
+    const activeColor = getItemColor(activeItem);
+    preloadTintedGarmentAngles(
+      [activeItem.image, activeItem.sideImage, activeItem.backImage],
+      activeItem.color,
+      activeColor,
+      0.11,
+    );
+  }, [activeItem, getItemColor]);
 
-  // Keep rolling color label synced if active color changes globally (e.g. from Hero Rail)
-  const activeColor = getItemColor(activeItem);
-  React.useEffect(() => {
-    rollText(bColorRef.current, `Color · ${getColorName(activeColor)}`);
-  }, [activeColor, rollText]);
+  // Measure sliding tab pill
+  const updateTabPill = React.useCallback(() => {
+    const btn = tabBtnRefs.current[tabCategory];
+    if (!btn) return;
+    setPillStyle({ left: btn.offsetLeft, width: btn.offsetWidth });
+  }, [tabCategory]);
 
   React.useLayoutEffect(() => {
-    activeTabRef.current = activeTab;
-    positionTabPill(activeTab);
-  }, [activeTab, positionTabPill]);
+    updateTabPill();
+  }, [updateTabPill]);
 
   React.useEffect(() => {
-    const section = sectionRef.current;
-    if (!section) return;
-
-    const first = visibleItemsRef.current[0];
-    if (first) {
-      rollText(bNameRef.current, first.name);
-      rollText(bPriceRef.current, first.tag ?? "$0");
-      rollText(bColorRef.current, `Color · ${getColorName(getItemColorRef.current(first))}`);
-    }
-
-    const rmq = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const syncReduced = () => {
-      engineRef.current.reduced = rmq.matches;
-      if (rmq.matches) engineRef.current.intro = 1;
-    };
-    syncReduced();
-    rmq.addEventListener("change", syncReduced);
+    const stage = stageRef.current;
+    if (!stage) return;
 
     const measure = () => {
-      const rect = section.getBoundingClientRect();
+      const rect = stage.getBoundingClientRect();
       const w = rect.width || window.innerWidth;
-      const h = rect.height || window.innerHeight;
-      const phone = window.innerWidth <= 767;
-      const cw = phone ? Math.min(w * 0.3, 170) : Math.min(w * 0.148, h * 0.33);
-      section.style.setProperty("--CW", `${cw.toFixed(2)}px`);
-      const xs = phone ? [0, 0.36, 0.5, 0.56, 0.6, 0.62] : [0, 0.215, 0.345, 0.432, 0.49, 0.52];
-      engineRef.current.W = w;
-      engineRef.current.H = h;
-      engineRef.current.XS = xs.map((v) => v * w);
-      positionTabPill(activeTabRef.current);
+      const h = rect.height || 540;
+      const phone = w <= 767;
+      const cardW = phone ? Math.min(w * 0.34, 152) : Math.min(w * 0.165, h * 0.39, 195);
+      const xsRatios = phone ? [0, 0.34, 0.48, 0.56, 0.61, 0.64] : [0, 0.225, 0.36, 0.445, 0.5, 0.53];
+      simRef.current.stageW = w;
+      simRef.current.stageH = h;
+      simRef.current.cardW = cardW;
+      simRef.current.xs = xsRatios.map((r) => r * w);
+      stage.style.setProperty("--arc-cw", `${cardW.toFixed(1)}px`);
+      updateTabPill();
     };
 
     measure();
     const ro = new ResizeObserver(measure);
-    ro.observe(section);
+    ro.observe(stage);
+    return () => ro.disconnect();
+  }, [updateTabPill]);
 
-    document.fonts?.ready.then(() => {
-      positionTabPill(activeTabRef.current);
-    });
+  // Scan-line transition animation whenever activeItem, color, or angle changes
+  React.useEffect(() => {
+    if (reducedMotion || scanCycle === 0) return;
+    const nextEl = scanNextRef.current;
+    const gridEl = scanGridRef.current;
+    const lineEl = scanLineRef.current;
+    if (!nextEl || !gridEl || !lineEl) return;
 
-    const updateCursorClass = () => {
-      const curEl = curRef.current;
-      const s = engineRef.current;
-      if (!curEl) return;
-      curEl.classList.remove("is-try", "is-drag", "is-btn");
-      if (s.dragging) {
-        curEl.classList.add("is-drag");
-        return;
-      }
-      const el = s.hoverTarget as HTMLElement | null;
-      if (!el || typeof el.closest !== "function") return;
-      if (el.closest("#spatial-studio button")) {
-        curEl.classList.add("is-btn");
-      } else if (el.closest(".vf-card")) {
-        curEl.classList.add("is-try");
-      } else if (el.closest(".vf-stage")) {
-        curEl.classList.add("is-drag");
-      }
+    const anims: Animation[] = [
+      nextEl.animate(
+        [{ clipPath: "inset(0 0 100% 0)" }, { clipPath: "inset(0 0 0% 0)" }],
+        { duration: 760, easing: "cubic-bezier(.65,0,.35,1)", fill: "forwards" },
+      ),
+      nextEl.animate(
+        [{ transform: "scale(1.022)" }, { transform: "scale(1)" }],
+        { duration: 920, easing: "ease-out" },
+      ),
+      gridEl.animate(
+        [
+          { clipPath: "inset(0 0 100% 0)", opacity: 0.9, offset: 0 },
+          { clipPath: "inset(0 0 0 0)", opacity: 0.95, offset: 0.48 },
+          { clipPath: "inset(100% 0 0 0)", opacity: 0, offset: 1 },
+        ],
+        { duration: 860, easing: "cubic-bezier(.65,0,.35,1)" },
+      ),
+      lineEl.animate(
+        [
+          { top: "2%", transform: "scaleX(0.25)", opacity: 0, offset: 0 },
+          { top: "8%", transform: "scaleX(1)", opacity: 1, offset: 0.1 },
+          { top: "92%", transform: "scaleX(1)", opacity: 1, offset: 0.9 },
+          { top: "98%", transform: "scaleX(0.25)", opacity: 0, offset: 1 },
+        ],
+        { duration: 760, easing: "cubic-bezier(.65,0,.35,1)" },
+      ),
+    ];
+
+    return () => {
+      anims.forEach((a) => a.cancel());
     };
+  }, [scanCycle, reducedMotion]);
 
-    const onWindowPointerDown = (e: PointerEvent) => {
-      if (e.pointerType === "mouse" && engineRef.current.curVisible) {
-        curRef.current?.classList.add("is-down");
-      }
-    };
+  // Main 3D spatial arc animation loop (runs only while section is in view)
+  React.useEffect(() => {
+    const section = sectionRef.current;
+    if (!section) return;
 
-    const onWindowPointerMove = (e: PointerEvent) => {
-      const s = engineRef.current;
-      const curEl = curRef.current;
-      const rect = section.getBoundingClientRect();
-      const inside =
-        e.clientX >= rect.left &&
-        e.clientX <= rect.right &&
-        e.clientY >= rect.top &&
-        e.clientY <= rect.bottom;
-
-      if (inside || s.dragging) {
-        s.tx = e.clientX;
-        s.ty = e.clientY;
-        s.tsx = (e.clientX - rect.left) / Math.max(1, s.W) - 0.5;
-        s.tsy = (e.clientY - rect.top) / Math.max(1, s.H) - 0.5;
-        s.hoverTarget = e.target;
-
-        if (!s.curVisible && e.pointerType === "mouse" && curEl) {
-          s.curVisible = true;
-          s.cx = s.tx;
-          s.cy = s.ty;
-          curEl.style.opacity = "1";
-        }
-      } else if (s.curVisible && curEl) {
-        s.curVisible = false;
-        curEl.style.opacity = "0";
-      }
-
-      if (s.dragging) {
-        const dx = e.clientX - s.startX;
-        s.moved = Math.hypot(dx, e.clientY - s.startY);
-        s.pos = s.p0 - dx / Math.max(1, s.XS[1]);
-        const now = performance.now();
-        const dt = now - s.lastT;
-        if (dt > 0) {
-          const inst = (e.clientX - s.lastX) / dt;
-          s.vx = s.vx * 0.6 + inst * 0.4;
-          s.lastX = e.clientX;
-          s.lastT = now;
-        }
-      }
-
-      updateCursorClass();
-    };
-
-    const endDrag = (e?: PointerEvent) => {
-      const s = engineRef.current;
-      curRef.current?.classList.remove("is-down");
-      if (!s.dragging) return;
-      s.dragging = false;
-
-      const n = s.count;
-      if (s.moved < 6 && s.downCardIdx !== null && n > 1) {
-        const u = circularOffset(s.downCardIdx, s.pos, n);
-        s.target = Math.round(s.pos + u);
-      } else if (n > 1) {
-        if (performance.now() - s.lastT > 80) s.vx = 0;
-        s.target = Math.round(s.pos - s.vx * 3.2);
-      }
-      s.downCardIdx = null;
-      if (e?.target) s.hoverTarget = e.target;
-      updateCursorClass();
-    };
-
-    const onMouseLeaveSection = () => {
-      const s = engineRef.current;
-      if (s.dragging) return;
-      s.curVisible = false;
-      if (curRef.current) curRef.current.style.opacity = "0";
-    };
-
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (!engineRef.current.inView) return;
-      const activeTag = (document.activeElement as HTMLElement | null)?.tagName;
-      if (activeTag === "INPUT" || activeTag === "TEXTAREA" || activeTag === "SELECT") return;
-      const focusedOutside =
-        document.activeElement &&
-        document.activeElement !== document.body &&
-        !section.contains(document.activeElement);
-      if (focusedOutside) return;
-      if (e.key === "ArrowLeft") {
-        e.preventDefault();
-        engineRef.current.target -= 1;
-      } else if (e.key === "ArrowRight") {
-        e.preventDefault();
-        engineRef.current.target += 1;
-      }
-    };
-
-    window.addEventListener("pointerdown", onWindowPointerDown);
-    window.addEventListener("pointermove", onWindowPointerMove);
-    window.addEventListener("pointerup", endDrag);
-    window.addEventListener("pointercancel", endDrag);
-    window.addEventListener("keydown", onKeyDown);
-    section.addEventListener("mouseleave", onMouseLeaveSection);
+    let raf = 0;
+    let inView = true;
 
     const xAt = (a: number, xs: number[]) => {
-      if (a >= 5) return xs[5] ?? 600;
+      if (a >= 5) return xs[5] ?? 440;
       const k = Math.floor(a);
-      return (xs[k] ?? 0) + ((xs[k + 1] ?? 0) - (xs[k] ?? 0)) * (a - k);
+      const lo = xs[k] ?? 0;
+      const hi = xs[k + 1] ?? lo;
+      return lo + (hi - lo) * (a - k);
     };
 
-    const frame = (now: number) => {
-      const s = engineRef.current;
-      if (!s.inView || document.visibilityState === "hidden") {
-        s.raf = 0;
-        return;
-      }
-
+    const tick = (now: number) => {
+      const s = simRef.current;
       const t = now * 0.001;
-      if (s.reduced) {
-        s.intro = 1;
-        if (!s.dragging) s.pos = s.target;
-      } else {
-        if (s.intro < 1) s.intro = Math.min(1, s.intro + 0.012);
-        if (!s.dragging) s.pos += (s.target - s.pos) * 0.11;
-      }
+      const n = s.count;
 
-      const ie = 1 - Math.pow(1 - s.intro, 3);
+      if (reducedMotion) {
+        if (!s.dragging) s.pos = s.target;
+      } else if (!s.dragging) {
+        s.pos += (s.target - s.pos) * 0.12;
+      }
 
       s.sx += (s.tsx - s.sx) * 0.06;
       s.sy += (s.tsy - s.sy) * 0.06;
 
-      s.cx += (s.tx - s.cx) * 0.22;
-      s.cy += (s.ty - s.cy) * 0.22;
-      if (curRef.current) {
-        curRef.current.style.transform = `translate3d(${s.cx.toFixed(2)}px, ${s.cy.toFixed(2)}px, 0)`;
+      if (roomRef.current && !reducedMotion) {
+        roomRef.current.style.transform = `translate3d(${(-s.sx * 18).toFixed(2)}px, ${(-s.sy * 12).toFixed(2)}px, 0) scale(1.06)`;
       }
 
-      if (roomRef.current) {
-        roomRef.current.style.transform = `translate3d(${(-s.sx * 22).toFixed(2)}px, ${(-s.sy * 14).toFixed(2)}px, 0) scale(${(1.08 - 0.03 * ie).toFixed(4)})`;
-      }
+      const h = s.stageH;
 
-      const ghostEl = ghostRef.current;
-      if (ghostEl) {
-        ghostEl.style.transform = `translate(calc(-50% - ${(s.sx * 40).toFixed(2)}px), ${(-s.sy * 16).toFixed(2)}px)`;
-        const letters = ghostEl.children;
-        for (let i = 0; i < letters.length; i++) {
-          const span = letters[i] as HTMLElement;
-          span.style.transform = `translateY(${((1 - ie) * (60 + 30 * i)).toFixed(2)}px)`;
-        }
-      }
-
-      const n = s.count;
       for (let i = 0; i < n; i++) {
         const el = cardRefs.current[i];
         if (!el) continue;
@@ -544,411 +283,615 @@ export function SpatialTryOnSection({
         const a = Math.abs(u);
         const sg = u < 0 ? -1 : u > 0 ? 1 : 0;
 
-        const x = sg * xAt(a, s.XS) * ie;
-        let sc = 1;
+        const x = sg * xAt(a, s.xs);
+        let scale = 1;
         let z = 0;
         let ry = 0;
         let op = 1;
         let blur = 0;
 
         if (a < 1) {
-          sc = 0.55 + 0.45 * a;
-          z = -260 * (1 - a);
-          op = a;
+          // Smooth fade-out right into the central spotlight garment
+          scale = 0.56 + 0.44 * a;
+          z = -240 * (1 - a);
+          op = Math.max(0, (a - 0.14) / 0.86);
           ry = -sg * 16 * a;
         } else {
-          sc = 1 / (1 + 0.3 * Math.pow(a - 1, 1.15));
-          z = -110 * (a - 1);
+          scale = 1 / (1 + 0.3 * Math.pow(a - 1, 1.15));
+          z = -105 * (a - 1);
           ry = -sg * (16 + 9 * Math.min(2, a - 1));
-          blur = Math.max(0, a - 1.6) * 2.4;
-          op = a > 3.4 ? Math.max(0, 1 - (a - 3.4) / 0.8) : 1;
+          blur = Math.max(0, a - 1.55) * 2.1;
+          op = a > 3.25 ? Math.max(0, 1 - (a - 3.25) / 0.85) : 1;
         }
 
-        ry += s.sx * 10;
-        const bob = s.reduced ? 0 : Math.sin(t * 1.1 + i * 1.37) * s.H * 0.006 * Math.min(1, a);
-        const y = bob - (1 - sc) * s.H * 0.04;
-        const finalOp = op * ie;
+        ry += s.sx * 9;
+        const bob = reducedMotion ? 0 : Math.sin(t * 1.15 + i * 1.37) * h * 0.008 * Math.min(1, a);
+        const y = bob - (1 - scale) * h * 0.045;
 
-        if (finalOp < 0.01) {
+        if (op < 0.01) {
           el.style.visibility = "hidden";
           el.style.opacity = "0";
+          el.style.pointerEvents = "none";
         } else {
           el.style.visibility = "visible";
-          el.style.opacity = finalOp.toFixed(4);
-          el.style.zIndex = String(a < 1 ? 1 : Math.round(100 - 10 * a));
+          el.style.opacity = op.toFixed(4);
+          el.style.pointerEvents = a >= 0.72 ? "auto" : "none";
+          el.style.zIndex = String(a < 1 ? 2 : Math.round(40 - 8 * a));
           el.style.filter = blur > 0.05 ? `blur(${blur.toFixed(2)}px)` : "";
-          el.style.transform = `translate(${x.toFixed(2)}px, ${y.toFixed(2)}px) perspective(1300px) translateZ(${z.toFixed(2)}px) rotateY(${ry.toFixed(2)}deg) rotateX(${(-s.sy * 6).toFixed(2)}deg) scale(${(sc * (0.6 + 0.4 * ie)).toFixed(4)})`;
+          el.style.transform = `translate3d(${x.toFixed(2)}px, ${y.toFixed(2)}px, 0) perspective(1300px) translateZ(${z.toFixed(2)}px) rotateY(${ry.toFixed(2)}deg) rotateX(${(-s.sy * 5).toFixed(2)}deg) scale(${scale.toFixed(4)})`;
         }
       }
 
-      if (!s.dragging && n > 0 && Math.abs(s.target - s.pos) < 0.02) {
-        const itemIdx = mod(Math.round(s.target), n);
-        const list = visibleItemsRef.current;
-        const targetItem = list[itemIdx];
-        const nextKey = targetItem ? `${targetItem.id}:${itemIdx}` : "";
-        if (nextKey && nextKey !== s.shownKey) {
-          tryOn(itemIdx);
+      if (!s.dragging && n > 0 && Math.abs(s.target - s.pos) < 0.045) {
+        const nextSettled = mod(Math.round(s.target), n);
+        if (nextSettled !== s.settledIdx) {
+          s.settledIdx = nextSettled;
+          setActiveIdx(nextSettled);
+          setScanCycle((c) => c + 1);
         }
       }
 
-      s.raf = requestAnimationFrame(frame);
+      if (inView && document.visibilityState !== "hidden") {
+        raf = requestAnimationFrame(tick);
+      } else {
+        raf = 0;
+      }
     };
 
     const observer = new IntersectionObserver(
       (entries) => {
-        const visible = entries[0]?.isIntersecting ?? false;
-        engineRef.current.inView = visible;
-        if (visible && !engineRef.current.raf) {
-          engineRef.current.raf = requestAnimationFrame(frame);
-        }
-        if (!visible && curRef.current && !engineRef.current.dragging) {
-          engineRef.current.curVisible = false;
-          curRef.current.style.opacity = "0";
+        const visible = entries[0]?.isIntersecting ?? true;
+        inView = visible;
+        if (visible && !raf) {
+          raf = requestAnimationFrame(tick);
         }
       },
-      { threshold: 0.12 },
+      { rootMargin: "120px" },
     );
     observer.observe(section);
+    raf = requestAnimationFrame(tick);
 
     return () => {
-      cancelAnimationFrame(engineRef.current.raf);
-      engineRef.current.raf = 0;
+      cancelAnimationFrame(raf);
       observer.disconnect();
-      ro.disconnect();
-      rmq.removeEventListener("change", syncReduced);
-      window.removeEventListener("pointerdown", onWindowPointerDown);
-      window.removeEventListener("pointermove", onWindowPointerMove);
-      window.removeEventListener("pointerup", endDrag);
-      window.removeEventListener("pointercancel", endDrag);
-      window.removeEventListener("keydown", onKeyDown);
-      section.removeEventListener("mouseleave", onMouseLeaveSection);
-      cancelScan();
-      if (curRef.current) curRef.current.style.opacity = "0";
     };
-  }, [cancelScan, positionTabPill, rollText, tryOn]);
+  }, [reducedMotion]);
+
+  const stepArc = React.useCallback((delta: number) => {
+    const n = simRef.current.count;
+    if (n <= 1) return;
+    simRef.current.target += delta;
+    const nextIdx = mod(Math.round(simRef.current.target), n);
+    simRef.current.settledIdx = nextIdx;
+    setActiveIdx(nextIdx);
+    setScanCycle((c) => c + 1);
+  }, []);
+
+  const focusCardAt = React.useCallback((cardIdx: number) => {
+    const s = simRef.current;
+    const n = s.count;
+    if (n <= 1) return;
+    const u = circularOffset(cardIdx, s.pos, n);
+    s.target = Math.round(s.pos + u);
+    const nextIdx = mod(s.target, n);
+    s.settledIdx = nextIdx;
+    setActiveIdx(nextIdx);
+    setScanCycle((c) => c + 1);
+  }, []);
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0 && e.pointerType === "mouse") return;
+    const targetEl = e.target as HTMLElement;
+    if (targetEl.closest("[data-arc-control]")) return;
+
+    const s = simRef.current;
+    s.dragging = true;
+    s.startX = e.clientX;
+    s.startY = e.clientY;
+    s.p0 = s.pos;
+    s.moved = 0;
+    s.lastX = e.clientX;
+    s.lastT = performance.now();
+    s.vx = 0;
+    const cardBtn = targetEl.closest<HTMLElement>("[data-arc-card]");
+    s.downIdx = cardBtn ? Number(cardBtn.dataset.arcCard) : null;
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const s = simRef.current;
+    const stage = stageRef.current;
+    if (stage) {
+      const rect = stage.getBoundingClientRect();
+      s.tsx = (e.clientX - rect.left) / Math.max(1, rect.width) - 0.5;
+      s.tsy = (e.clientY - rect.top) / Math.max(1, rect.height) - 0.5;
+    }
+
+    if (!s.dragging) return;
+    const dx = e.clientX - s.startX;
+    s.moved = Math.hypot(dx, e.clientY - s.startY);
+    const stepPx = Math.max(80, s.xs[1] ?? 180);
+    s.pos = s.p0 - dx / stepPx;
+    const now = performance.now();
+    const dt = now - s.lastT;
+    if (dt > 0) {
+      const inst = (e.clientX - s.lastX) / dt;
+      s.vx = s.vx * 0.6 + inst * 0.4;
+      s.lastX = e.clientX;
+      s.lastT = now;
+    }
+  };
+
+  const handlePointerEnd = () => {
+    const s = simRef.current;
+    if (!s.dragging) return;
+    s.dragging = false;
+
+    if (s.moved < 8 && s.downIdx !== null) {
+      focusCardAt(s.downIdx);
+    } else if (s.count > 1) {
+      if (performance.now() - s.lastT > 80) s.vx = 0;
+      s.target = Math.round(s.pos - s.vx * 2.6);
+      const nextIdx = mod(s.target, s.count);
+      s.settledIdx = nextIdx;
+      setActiveIdx(nextIdx);
+      setScanCycle((c) => c + 1);
+    }
+    s.downIdx = null;
+  };
 
   if (!activeItem) return null;
 
+  const activeColor = getItemColor(activeItem);
   const chosenSize = selectedSizes[activeItem.id] ?? "M";
   const colorOptions = activeItem.colors ?? getColorOptionsForItem(activeItem.color);
-
-  const handleAddActive = () => {
-    const rect = bThumbWrapRef.current?.getBoundingClientRect();
-    onAddToBag(activeItem, chosenSize, activeColor, rect);
-    setJustAdded(true);
-    if (addedTimerRef.current !== null) window.clearTimeout(addedTimerRef.current);
-    addedTimerRef.current = window.setTimeout(() => setJustAdded(false), 1200);
-  };
+  const hasSide = Boolean(activeItem.sideImage);
+  const effectiveView: StageView = stageView === "side" && !hasSide ? "front" : stageView;
 
   return (
-    <section ref={sectionRef} id="spatial-studio" aria-label="VirtualFit: Spatial Try-On">
-      <div ref={roomRef} className="vf-room" />
-
-      <div ref={ghostRef} className="vf-ghost" aria-hidden="true">
-        <span>F</span>
-        <span>I</span>
-        <span>T</span>
-      </div>
-
-      <nav ref={tabsRef} className="vf-tabs vf-glass" aria-label="Categories">
-        <div ref={tabPillRef} className="vf-tab-pill" />
-        {TABS.map((tab, idx) => (
-          <button
-            key={tab.key}
-            ref={(node) => {
-              tabBtnRefs.current[idx] = node;
-            }}
-            type="button"
-            className={`vf-tab${activeTab === idx ? " is-active" : ""}`}
-            onClick={() => {
-              setActiveTab(idx);
-              positionTabPill(idx);
-            }}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </nav>
-
-      <aside className="vf-rail vf-glass" aria-label="Tools">
-        <button
-          type="button"
-          className={activeTool === 0 ? "is-active" : undefined}
-          aria-label="Try On"
-          title="Try On"
-          onClick={() => {
-            setActiveTool(0);
-            engineRef.current.shownKey = "";
-            tryOn(safeIdx);
-          }}
-        >
-          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-            <path d="M16.2 3.5a1 1 0 0 0-.84.46 3.9 3.9 0 0 1-6.72 0 1 1 0 0 0-.84-.46L3.6 5.2a1 1 0 0 0-.55.56l-1.5 3.8a1 1 0 0 0 .54 1.29l2.41 1.02V20a1 1 0 0 0 1 1h13a1 1 0 0 0 1-1v-8.13l2.41-1.02a1 1 0 0 0 .54-1.29l-1.5-3.8a1 1 0 0 0-.55-.56l-4.2-1.7Z" />
-          </svg>
-        </button>
-        <button
-          type="button"
-          className={activeTool === 1 ? "is-active" : undefined}
-          aria-label={`Add ${activeItem.name} to Bag`}
-          title={`Add ${activeItem.name} to Bag`}
-          onClick={() => {
-            setActiveTool(1);
-            handleAddActive();
-          }}
-        >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.75"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            <circle cx="9" cy="20" r="1.4" />
-            <circle cx="17" cy="20" r="1.4" />
-            <path d="M3 4h2.5l2.1 10.5a1.5 1.5 0 0 0 1.47 1.2h8.36a1.5 1.5 0 0 0 1.46-1.16L20.5 7.5H6.2" />
-          </svg>
-        </button>
-        <button
-          type="button"
-          className={activeTool === 2 ? "is-active" : undefined}
-          aria-label={`Inspect ${activeItem.name} in 360°`}
-          title="Open 360° Turntable"
-          onClick={() => {
-            setActiveTool(2);
-            onOpenModal(activeItem, 0);
-          }}
-        >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.75"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            <rect x="3.5" y="5" width="17" height="15.5" rx="2.5" />
-            <path d="M8 3v4M16 3v4M3.5 9.5h17" />
-          </svg>
-        </button>
-        <button
-          type="button"
-          className={activeTool === 3 ? "is-active" : undefined}
-          aria-label={`View ${activeItem.name} Details`}
-          title="View Product Page"
-          onClick={() => {
-            setActiveTool(3);
-            navigate(`/product/${activeItem.id}`);
-          }}
-        >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.75"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            <circle cx="12" cy="8.5" r="3.8" />
-            <path d="M5 20c.8-3.4 3.6-5.2 7-5.2s6.2 1.8 7 5.2" />
-          </svg>
-        </button>
-      </aside>
-
+    <section
+      ref={sectionRef}
+      id="spatial-studio"
+      aria-labelledby="spatial-studio-heading"
+      className="relative overflow-hidden border-b border-border bg-muted/30"
+    >
+      {/* Blurred Warm Atelier Room Backdrop with Subtle Parallax */}
       <div
-        ref={stageRef}
-        className="vf-stage"
-        onPointerDown={(e) => {
-          if (e.button !== 0 && e.pointerType === "mouse") return;
-          const s = engineRef.current;
-          s.dragging = true;
-          s.startX = e.clientX;
-          s.startY = e.clientY;
-          s.p0 = s.pos;
-          s.moved = 0;
-          s.lastX = e.clientX;
-          s.lastT = performance.now();
-          s.vx = 0;
-          const cardEl = (e.target as HTMLElement).closest<HTMLElement>(".vf-card");
-          s.downCardIdx = cardEl ? Number(cardEl.dataset.index) : null;
-          if (curRef.current) {
-            curRef.current.classList.add("is-down");
-            curRef.current.classList.remove("is-try", "is-btn");
-            curRef.current.classList.add("is-drag");
-          }
+        ref={roomRef}
+        aria-hidden="true"
+        className="pointer-events-none absolute -inset-4 bg-cover bg-center opacity-35 blur-[6px] saturate-105 transition-opacity dark:opacity-20"
+        style={{
+          backgroundImage: `url("/src/assets/images/atelier_studio_rail_1795500631906.jpg")`,
+          transform: "scale(1.06)",
+          willChange: "transform",
         }}
-        onWheel={(e) => {
-          if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
-          const s = engineRef.current;
-          s.wheelAcc += e.deltaX;
-          const now = performance.now();
-          if (Math.abs(s.wheelAcc) >= 60 && now - s.lastWheel >= 260) {
-            s.target += s.wheelAcc > 0 ? 1 : -1;
-            s.wheelAcc = 0;
-            s.lastWheel = now;
-          }
-        }}
-      >
-        <div className="vf-arc">
-          {visibleItems.map((item, i) => {
-            const itemColor = getItemColor(item);
-            return (
-              <div
-                key={item.id}
-                ref={(node) => {
-                  cardRefs.current[i] = node;
-                }}
-                data-index={i}
-                className="vf-card vf-glass"
-                onPointerEnter={() => {
-                  const s = engineRef.current;
-                  const sheen = sheenRefs.current[i];
-                  if (s.reduced || !sheen) return;
-                  sheen.getAnimations().forEach((a) => a.cancel());
-                  sheen.animate(
-                    [{ transform: "translateX(-110%)" }, { transform: "translateX(110%)" }],
-                    { duration: 1000, easing: EASE },
-                  );
-                }}
-              >
-                <div className="vf-card-g">
-                  <GarmentThumbnail item={item} colorOverride={itemColor} decorative />
-                </div>
-                <div className="vf-card-name">{item.name}</div>
-                <div className="vf-card-price">{item.tag}</div>
-                <div
-                  ref={(node) => {
-                    sheenRefs.current[i] = node;
-                  }}
-                  className="vf-sheen"
-                />
-              </div>
-            );
-          })}
-        </div>
-      </div>
+      />
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 bg-gradient-to-b from-background/85 via-background/35 to-background/90"
+      />
 
-      <div className="vf-model" aria-hidden="true">
-        <div ref={mCurRef} className="vf-fig vf-m-cur" />
-        <div ref={mNextRef} className="vf-fig vf-m-next" />
-        <div ref={scanGridRef} className="vf-grid" />
-        <div ref={scanLineRef} className="vf-scan" />
-      </div>
-
-      {count > 1 && (
-        <>
-          <button
-            type="button"
-            className="vf-arrow vf-glass vf-prev"
-            aria-label="Previous garment"
-            onClick={() => {
-              engineRef.current.target -= 1;
-            }}
-          >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
+      <div className="relative z-10 mx-auto max-w-6xl px-4 py-10 sm:px-6 sm:py-14">
+        {/* Clean Editorial Header + Sliding Frosted-Glass Category Pill */}
+        <div className="flex flex-col items-center justify-between gap-5 text-center md:flex-row md:items-end md:text-left">
+          <div className="space-y-1.5">
+            <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+              Spatial Fitting Arc
+            </p>
+            <h2
+              id="spatial-studio-heading"
+              className="text-balance text-2xl font-semibold tracking-tight sm:text-3xl"
             >
-              <path d="M15 18l-6-6 6-6" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            className="vf-arrow vf-glass vf-next"
-            aria-label="Next garment"
-            onClick={() => {
-              engineRef.current.target += 1;
-            }}
-          >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <path d="M9 18l6-6-6-6" />
-            </svg>
-          </button>
-        </>
-      )}
+              Slide the arc to inspect every garment at full scale.
+            </h2>
+          </div>
 
-      <div className="vf-buy vf-glass" role="region" aria-label="Selected garment">
-        <div ref={bThumbWrapRef} className="vf-thumb">
-          <div ref={bThumbRef} className="vf-thumb-g">
-            <GarmentThumbnail item={activeItem} colorOverride={activeColor} decorative />
-          </div>
-        </div>
-        <div className="vf-info">
-          <div ref={bNameRef} className="vf-b-name vf-ln" />
-          <div ref={bPriceRef} className="vf-b-price vf-ln" />
-        </div>
-        <div className="vf-sizes-wrap">
-          <span className="vf-lbl">Size</span>
-          <div className="vf-sizes">
-            {SIZES.map((sz) => (
-              <button
-                key={sz}
-                type="button"
-                className={`vf-chip${chosenSize === sz ? " is-active" : ""}`}
-                onClick={() => onSizeChange(activeItem.id, sz)}
-              >
-                {sz}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="vf-colors-wrap">
-          <div ref={bColorRef} className="vf-lbl vf-ln" />
-          <div className="vf-dots">
-            {colorOptions.map((opt) => {
-              const isSelected = opt.hex.toUpperCase() === activeColor.toUpperCase();
+          <div
+            ref={tabsContainerRef}
+            role="tablist"
+            aria-label="Filter spatial garment arc"
+            className="relative flex max-w-full items-center gap-0.5 overflow-x-auto rounded-full border border-border/80 bg-card/75 p-1 shadow-sm backdrop-blur-xl [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          >
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute top-1 h-[34px] rounded-full bg-foreground shadow-sm transition-[transform,width] duration-500 ease-[cubic-bezier(.2,.8,.2,1)]"
+              style={{
+                width: `${pillStyle.width}px`,
+                transform: `translate3d(${pillStyle.left}px, 0, 0)`,
+              }}
+            />
+            {CATEGORY_TABS.map((tab) => {
+              const isActive = tabCategory === tab.key;
               return (
                 <button
-                  key={`${activeItem.id}-${opt.hex}`}
-                  type="button"
-                  className={`vf-dot${isSelected ? " is-active" : ""}`}
-                  style={{ background: opt.hex }}
-                  aria-label={opt.name}
-                  title={opt.name}
-                  onClick={() => {
-                    onColorChange(activeItem.id, opt.hex);
-                    rollText(bColorRef.current, `Color · ${opt.name}`);
+                  key={tab.key}
+                  ref={(node) => {
+                    tabBtnRefs.current[tab.key] = node;
                   }}
-                />
+                  type="button"
+                  role="tab"
+                  aria-selected={isActive}
+                  onClick={() => setTabCategory(tab.key)}
+                  className={`relative z-10 h-[34px] whitespace-nowrap shrink-0 rounded-full px-3.5 text-xs font-medium transition-colors sm:px-4 ${
+                    isActive
+                      ? "text-background"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {tab.label}
+                </button>
               );
             })}
           </div>
         </div>
-        <button
-          type="button"
-          className="vf-add-btn"
-          onClick={handleAddActive}
-        >
-          {justAdded ? "Added ✓" : "Add to Bag"}
-        </button>
-      </div>
 
-      {mounted &&
-        createPortal(
-          <div ref={curRef} className="vf-cur" aria-hidden="true">
-            <div className="vf-cur-ring" />
-            <div className="vf-cur-dot" />
-            <span className="vf-cur-lbl vf-cur-try">TRY ON</span>
-            <span className="vf-cur-lbl vf-cur-drag">DRAG</span>
-          </div>,
-          document.body,
-        )}
+        {/* Main 3D Spatial Arc Stage */}
+        <div
+          ref={stageRef}
+          tabIndex={0}
+          role="region"
+          aria-label="Interactive 3D garment arc"
+          onKeyDown={(e) => {
+            if (e.key === "ArrowLeft") {
+              e.preventDefault();
+              stepArc(-1);
+            } else if (e.key === "ArrowRight") {
+              e.preventDefault();
+              stepArc(1);
+            }
+          }}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerEnd}
+          onPointerCancel={handlePointerEnd}
+          onPointerLeave={() => {
+            simRef.current.tsx = 0;
+            simRef.current.tsy = 0;
+          }}
+          className="relative mt-6 h-[430px] w-full touch-pan-y select-none outline-none focus-visible:ring-2 focus-visible:ring-ring sm:h-[500px] lg:h-[540px]"
+          style={{ ["--arc-cw" as string]: "172px" }}
+        >
+          {/* Left Floating Glass Tool Rail (Angle & 360° Controls) */}
+          <aside
+            data-arc-control
+            aria-label="Garment angle and inspector tools"
+            className="absolute left-1 top-1/2 z-40 hidden -translate-y-1/2 flex-col items-center gap-1.5 rounded-full border border-border/80 bg-card/75 p-1.5 shadow-lg backdrop-blur-xl sm:flex"
+          >
+            {(
+              [
+                ["front", "Front"],
+                ...(hasSide ? ([["side", "Side"]] as const) : []),
+                ["back", "Back"],
+              ] as const
+            ).map(([viewKey, label]) => {
+              const active = effectiveView === viewKey;
+              return (
+                <button
+                  key={viewKey}
+                  type="button"
+                  onClick={() => {
+                    setStageView(viewKey);
+                    setScanCycle((c) => c + 1);
+                  }}
+                  aria-pressed={active}
+                  title={`${label} view`}
+                  className={`flex h-9 w-12 items-center justify-center rounded-full text-[11px] font-medium transition-colors ${
+                    active
+                      ? "bg-foreground text-background shadow-sm"
+                      : "text-muted-foreground hover:bg-muted/70 hover:text-foreground"
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            })}
+            <div className="my-0.5 h-px w-6 bg-border" />
+            <button
+              type="button"
+              onClick={() =>
+                onOpenModal(activeItem, effectiveView === "back" ? 180 : effectiveView === "side" ? 90 : 0)
+              }
+              aria-label={`Open 360° turntable for ${activeItem.name}`}
+              title="Open 360° Inspector"
+              className="flex h-9 w-9 items-center justify-center rounded-full text-foreground transition-colors hover:bg-muted"
+            >
+              <Maximize2 className="size-4" />
+            </button>
+          </aside>
+
+          {/* Left / Right Arc Navigation Arrows */}
+          {count > 1 && (
+            <>
+              <button
+                data-arc-control
+                type="button"
+                aria-label="Previous garment"
+                onClick={() => stepArc(-1)}
+                className="absolute left-2 top-1/2 z-40 inline-flex size-10 -translate-y-1/2 items-center justify-center rounded-full border border-border/80 bg-card/80 text-foreground shadow-md backdrop-blur-xl transition-transform hover:scale-105 active:scale-95 sm:left-20 sm:size-11"
+              >
+                <ChevronLeft className="size-4" />
+              </button>
+              <button
+                data-arc-control
+                type="button"
+                aria-label="Next garment"
+                onClick={() => stepArc(1)}
+                className="absolute right-2 top-1/2 z-40 inline-flex size-10 -translate-y-1/2 items-center justify-center rounded-full border border-border/80 bg-card/80 text-foreground shadow-md backdrop-blur-xl transition-transform hover:scale-105 active:scale-95 sm:right-4 sm:size-11"
+              >
+                <ChevronRight className="size-4" />
+              </button>
+            </>
+          )}
+
+          {/* 3D Perspective Frosted-Glass Product Arc */}
+          <div aria-hidden="false" className="pointer-events-none absolute left-1/2 top-1/2 h-0 w-0">
+            {visibleItems.map((item, i) => {
+              const itemColor = getItemColor(item);
+              return (
+                <button
+                  key={item.id}
+                  ref={(node) => {
+                    cardRefs.current[i] = node;
+                  }}
+                  type="button"
+                  data-arc-card={i}
+                  aria-label={`Select ${item.name} (${item.tag})`}
+                  style={{
+                    width: "var(--arc-cw)",
+                    height: "calc(var(--arc-cw) * 1.38)",
+                    marginLeft: "calc(var(--arc-cw) * -0.5)",
+                    marginTop: "calc(var(--arc-cw) * -0.69)",
+                    willChange: "transform, opacity, filter",
+                  }}
+                  className="group/card absolute overflow-hidden rounded-2xl border border-border/80 bg-card/75 p-3 text-center shadow-lg backdrop-blur-xl transition-colors hover:border-foreground/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <div className="h-[68%] w-full">
+                    <GarmentThumbnail item={item} colorOverride={itemColor} decorative />
+                  </div>
+                  <p className="mt-1.5 truncate text-xs font-medium text-foreground sm:text-[13px]">
+                    {item.name}
+                  </p>
+                  <p className="mt-0.5 font-mono text-xs font-semibold tabular-nums text-muted-foreground">
+                    {item.tag}
+                  </p>
+                  <span
+                    aria-hidden="true"
+                    className="pointer-events-none absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/35 to-transparent transition-transform duration-700 group-hover/card:translate-x-full dark:via-white/15"
+                  />
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Center Garment Spotlight + Luminous Scan-Line Reveal */}
+          <div
+            ref={centerWrapRef}
+            className="pointer-events-auto relative z-30 mx-auto flex h-full w-[260px] flex-col items-center justify-center sm:w-[320px] lg:w-[360px]"
+          >
+            <button
+              data-arc-control
+              type="button"
+              onClick={() =>
+                onOpenModal(
+                  activeItem,
+                  effectiveView === "back" ? 180 : effectiveView === "side" ? 90 : 0,
+                )
+              }
+              aria-label={`Inspect ${activeItem.name} in 360 degrees`}
+              className="group relative flex h-[86%] w-full cursor-pointer items-center justify-center rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {/* Soft studio floor shadow */}
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute bottom-4 h-5 w-44 rounded-full bg-foreground/18 blur-lg"
+              />
+
+              {/* Garment silhouette reveal layer */}
+              <div
+                ref={scanNextRef}
+                className="relative h-full w-full drop-shadow-[0_18px_28px_rgba(0,0,0,0.18)]"
+              >
+                <GarmentThumbnail
+                  item={activeItem}
+                  view={effectiveView}
+                  colorOverride={activeColor}
+                />
+              </div>
+
+              {/* Scan grid overlay */}
+              <div
+                ref={scanGridRef}
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-0 opacity-0 mix-blend-screen"
+                style={{
+                  background:
+                    "repeating-linear-gradient(0deg, transparent 0 5px, rgba(255,255,255,0.28) 5px 6px)",
+                }}
+              />
+
+              {/* Luminous travelling scan beam */}
+              <div
+                ref={scanLineRef}
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-x-4 top-0 h-[2px] opacity-0"
+                style={{
+                  background:
+                    "linear-gradient(90deg, transparent, rgba(255,255,255,0.95) 20%, rgba(255,255,255,0.95) 80%, transparent)",
+                  boxShadow:
+                    "0 0 18px 4px rgba(255,255,255,0.75), 0 0 46px 10px rgba(170,220,255,0.45)",
+                }}
+              />
+
+              <span className="pointer-events-none absolute bottom-3 inline-flex items-center gap-1.5 rounded-full border border-border/80 bg-card/85 px-3 py-1 text-[11px] font-medium text-foreground opacity-0 shadow-sm backdrop-blur-md transition-opacity group-hover:opacity-100">
+                <Rotate3d className="size-3.5" />
+                <span>Open 360° View</span>
+              </span>
+            </button>
+          </div>
+        </div>
+
+        {/* Mobile View Angle Switcher */}
+        <div className="mt-2 flex justify-center sm:hidden">
+          <div
+            role="group"
+            aria-label="Garment angle"
+            className="inline-flex items-center gap-1 rounded-full border border-border bg-card/85 p-1 backdrop-blur-xl"
+          >
+            {(
+              [
+                ["front", "Front"],
+                ...(hasSide ? ([["side", "Side"]] as const) : []),
+                ["back", "Back"],
+              ] as const
+            ).map(([viewKey, label]) => (
+              <button
+                key={viewKey}
+                type="button"
+                onClick={() => {
+                  setStageView(viewKey);
+                  setScanCycle((c) => c + 1);
+                }}
+                className={`min-h-[32px] rounded-full px-3 text-xs font-medium transition-colors ${
+                  effectiveView === viewKey
+                    ? "bg-foreground text-background"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Floating Frosted-Glass Buy & Color Control Bar */}
+        <div className="relative z-40 mx-auto mt-5 max-w-4xl rounded-2xl border border-border/90 bg-card/85 p-3.5 shadow-xl backdrop-blur-2xl sm:mt-6 sm:p-4">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between lg:gap-5">
+            {/* Thumb + Title + Price */}
+            <div className="flex min-w-0 items-center gap-3.5">
+              <div
+                ref={thumbDockRef}
+                className="h-16 w-14 shrink-0 overflow-hidden rounded-xl border border-border bg-muted/50 p-1.5"
+              >
+                <GarmentThumbnail item={activeItem} colorOverride={activeColor} decorative />
+              </div>
+
+              <div className="min-w-0 flex-1 space-y-0.5">
+                <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+                  <span className="font-mono tabular-nums">
+                    {String(safeActiveIdx + 1).padStart(2, "0")} / {String(count).padStart(2, "0")}
+                  </span>
+                  <span aria-hidden="true">·</span>
+                  <span className="truncate">{getColorName(activeColor)}</span>
+                </div>
+                <Link
+                  to={`/product/${activeItem.id}`}
+                  className="block truncate text-base font-semibold tracking-tight text-foreground hover:underline underline-offset-4"
+                >
+                  {activeItem.name}
+                </Link>
+                <p className="font-mono text-sm font-medium tabular-nums text-muted-foreground">
+                  {activeItem.tag}
+                  {activeItem.details?.[0] ? ` · ${activeItem.details[0]}` : ""}
+                </p>
+              </div>
+            </div>
+
+            {/* Sizes + Color Swatches + Add to Bag CTA */}
+            <div className="flex flex-wrap items-center justify-between gap-4 sm:flex-nowrap lg:justify-end">
+              <div className="space-y-1">
+                <span className="block text-[11px] font-medium text-muted-foreground">Size</span>
+                <div className="flex items-center gap-1" role="group" aria-label="Select size">
+                  {SIZES.map((sz) => (
+                    <button
+                      key={sz}
+                      type="button"
+                      onClick={() => onSizeChange(activeItem.id, sz)}
+                      className={`inline-flex size-8 items-center justify-center rounded-full text-xs font-semibold transition-colors ${
+                        chosenSize === sz
+                          ? "bg-foreground text-background"
+                          : "bg-muted text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      {sz}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <span className="block text-[11px] font-medium text-muted-foreground">
+                  Color · {getColorName(activeColor)}
+                </span>
+                <div className="flex h-8 items-center gap-2" role="group" aria-label="Select color">
+                  {colorOptions.map((opt) => {
+                    const isSelected = opt.hex.toUpperCase() === activeColor.toUpperCase();
+                    return (
+                      <button
+                        key={opt.hex}
+                        type="button"
+                        title={opt.name}
+                        aria-label={`Color ${opt.name}`}
+                        aria-pressed={isSelected}
+                        onClick={() => {
+                          onColorChange(activeItem.id, opt.hex);
+                          setScanCycle((c) => c + 1);
+                        }}
+                        className={`inline-flex size-6 items-center justify-center rounded-full border transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                          isSelected
+                            ? "scale-110 border-foreground ring-1 ring-foreground ring-offset-1 ring-offset-card"
+                            : "border-transparent"
+                        }`}
+                      >
+                        <span
+                          className="size-4 rounded-full border border-foreground/20"
+                          style={{ backgroundColor: opt.hex }}
+                        />
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="flex w-full items-center gap-2 sm:w-auto">
+                <Button
+                  type="button"
+                  onClick={() => {
+                    const rect =
+                      centerWrapRef.current?.getBoundingClientRect() ??
+                      thumbDockRef.current?.getBoundingClientRect();
+                    onAddToBag(activeItem, chosenSize, activeColor, rect);
+                    setJustAdded(true);
+                    if (addedTimerRef.current !== null) {
+                      window.clearTimeout(addedTimerRef.current);
+                    }
+                    addedTimerRef.current = window.setTimeout(() => setJustAdded(false), 1200);
+                  }}
+                  className="min-h-[44px] flex-1 whitespace-nowrap px-5 sm:flex-initial"
+                >
+                  {justAdded ? (
+                    <>
+                      <Check className="mr-1.5 size-4" />
+                      <span>Added</span>
+                    </>
+                  ) : (
+                    <>
+                      <ShoppingBag className="mr-1.5 size-4" />
+                      <span>Add to Bag</span>
+                    </>
+                  )}
+                </Button>
+                <Link
+                  to={`/product/${activeItem.id}`}
+                  aria-label={`View full details for ${activeItem.name}`}
+                  className="inline-flex min-h-[44px] items-center justify-center rounded-lg border border-border bg-background px-3.5 text-xs font-medium text-foreground transition-colors hover:bg-muted whitespace-nowrap shrink-0"
+                >
+                  <span>Details</span>
+                  <ArrowRight className="ml-1 size-3.5" />
+                </Link>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </section>
   );
 }

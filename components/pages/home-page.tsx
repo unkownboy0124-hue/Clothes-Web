@@ -166,9 +166,10 @@ export function HomePage({
         />
       </section>
 
-      {/* Section 2: VirtualFit Spatial Try-On Arc (all 10 products synchronized) */}
+      {/* Section 2: Spatial Fitting Arc (all 10 products synchronized) */}
       <SpatialTryOnSection
         items={RAIL_DEMO_ITEMS}
+        selectedColors={selectedColors}
         selectedSizes={selectedSizes}
         getItemColor={getItemColor}
         onColorChange={onColorChange}
